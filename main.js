@@ -406,7 +406,7 @@ class ParticleField {
     this.pixelRatio = 1;
     this.particles = [];
     this.vertexData = new Float32Array(PARTICLE_COUNT * FLOATS_PER_PARTICLE);
-    this.trailData = new Float32Array(PARTICLE_COUNT * 2 * FLOATS_PER_TRAIL_VERTEX);
+    this.trailData = new Float32Array(PARTICLE_COUNT * 4 * FLOATS_PER_TRAIL_VERTEX);
     this.buffer = gl.createBuffer();
     this.trailBuffer = gl.createBuffer();
     this.glowPulse = 0;
@@ -438,7 +438,12 @@ class ParticleField {
         y: Math.random(),
         vx: (Math.random() - 0.5) * 7,
         vy: (Math.random() - 0.5) * 7,
+        px: 0,
+        py: 0,
+        qx: 0,
+        qy: 0,
         phase: Math.random() * TAU,
+        lane: Math.random() * 2 - 1,
         size: 3 + Math.random() * 9,
         brightness: 0.35 + Math.random() * 0.65,
       });
@@ -460,6 +465,10 @@ class ParticleField {
     for (const particle of this.particles) {
       particle.x = oldWidth === 1 ? particle.x * width : (particle.x / oldWidth) * width;
       particle.y = oldHeight === 1 ? particle.y * height : (particle.y / oldHeight) * height;
+      particle.px = particle.x;
+      particle.py = particle.y;
+      particle.qx = particle.x;
+      particle.qy = particle.y;
     }
   }
 
@@ -505,25 +514,92 @@ class ParticleField {
     this.trailFade =
       blowLevel === 3 ? Math.min(1, this.trailFade + deltaSeconds * 4) : this.trailFade * Math.pow(0.9, frames);
 
-    const damping = Math.pow(blowLevel === 3 ? 0.978 : 0.965, frames);
+    const bloom = blowLevel === 3;
+    const centerX = this.width * 0.5;
+    const throatY = this.height * 0.9;
+    const damping = Math.pow(bloom ? 0.972 : 0.965, frames);
 
     for (let i = 0; i < this.particles.length; i += 1) {
       const particle = this.particles[i];
       const waveA = Math.sin(elapsedSeconds * 0.72 + particle.phase + particle.y * 0.008);
       const waveB = Math.cos(elapsedSeconds * 0.51 - particle.phase * 1.7 + particle.x * 0.006);
 
-      particle.vx += (waveA * 7 + this.flowSpeed * 0.28) * deltaSeconds;
-      particle.vy += (waveB * 7 - this.flowSpeed * 0.86) * deltaSeconds;
+      if (bloom) {
+        const rise = Math.max(0, Math.min(1.2, (throatY - particle.y) / Math.max(1, throatY)));
+        const dx = particle.x - centerX;
+        const theta = Math.atan2(dx, Math.max(12, throatY - particle.y));
+        const petal = 0.86 + 0.14 * Math.pow(Math.abs(Math.cos(theta * 2.5)), 1.1);
+        const tube = 0.14;
+        const u = Math.max(0, (rise - tube) / (1 - tube));
+        const exponent = 2.7;
+        const flare = Math.pow(u, exponent);
+        const flareDeriv = u <= 0 ? 0 : (exponent * Math.pow(u, exponent - 1)) / (1 - tube);
+        const amp = this.width * 0.5 * petal;
+        const targetX = centerX + particle.lane * (this.width * 0.028 + amp * flare);
+        const dxds = particle.lane * amp * flareDeriv;
+        const dyds = -throatY;
+        const tanLen = Math.hypot(dxds, dyds) || 1;
+        const speed = this.flowSpeed * (0.92 + rise * 0.4);
+        const tx = (dxds / tanLen) * speed;
+        const ty = (dyds / tanLen) * speed;
+        const steer = Math.min(1, 3.4 * deltaSeconds);
+        particle.vx += (tx - particle.vx) * steer;
+        particle.vy += (ty - particle.vy) * steer;
+        particle.vx += (targetX - particle.x) * 7 * deltaSeconds;
+        particle.vx += waveA * 4 * deltaSeconds;
+        particle.vy += waveB * 3 * deltaSeconds;
+        if (rise > 0.5) {
+          const lip = Math.min(1, (rise - 0.5) / 0.5);
+          const curl = lip * lip * (3 - 2 * lip);
+          particle.vx += particle.lane * this.flowSpeed * 1.15 * curl * deltaSeconds;
+          particle.vy += this.flowSpeed * 0.72 * curl * deltaSeconds;
+        }
+      } else {
+        particle.vx += (waveA * 7 + this.flowSpeed * 0.28) * deltaSeconds;
+        particle.vy += (waveB * 7 - this.flowSpeed * 0.86) * deltaSeconds;
+      }
+
       particle.vx *= damping;
       particle.vy *= damping;
       particle.x += particle.vx * deltaSeconds;
       particle.y += particle.vy * deltaSeconds;
 
       const margin = particle.size * 2;
-      if (particle.x < -margin) particle.x = this.width + margin;
-      else if (particle.x > this.width + margin) particle.x = -margin;
-      if (particle.y < -margin) particle.y = this.height + margin;
-      else if (particle.y > this.height + margin) particle.y = -margin;
+      let wrapped = false;
+      if (bloom) {
+        const offTop = particle.y < -margin;
+        const offSide = particle.x < -margin || particle.x > this.width + margin;
+        if (offTop || offSide) {
+          particle.x = centerX + (Math.random() - 0.5) * this.width * 0.07;
+          particle.y = throatY + Math.random() * this.height * 0.05;
+          particle.vx = particle.lane * 12;
+          particle.vy = -this.flowSpeed * 0.55;
+          wrapped = true;
+        } else if (particle.y > this.height + margin) {
+          particle.y = throatY;
+          particle.x = centerX + (Math.random() - 0.5) * this.width * 0.06;
+          wrapped = true;
+        }
+      } else {
+        if (particle.x < -margin) particle.x = this.width + margin;
+        else if (particle.x > this.width + margin) particle.x = -margin;
+        if (particle.y < -margin) particle.y = this.height + margin;
+        else if (particle.y > this.height + margin) particle.y = -margin;
+      }
+
+      if (wrapped) {
+        particle.px = particle.x;
+        particle.py = particle.y;
+        particle.qx = particle.x;
+        particle.qy = particle.y;
+      } else {
+        const followHead = 1 - Math.pow(0.84, frames);
+        const followTail = 1 - Math.pow(0.9, frames);
+        particle.px += (particle.x - particle.px) * followHead;
+        particle.py += (particle.y - particle.py) * followHead;
+        particle.qx += (particle.px - particle.qx) * followTail;
+        particle.qy += (particle.py - particle.qy) * followTail;
+      }
 
       const size =
         particle.size * (1 + this.sizePulse * 0.5 + (blowLevel === 3 ? 0.18 : 0) + blowEnergy * 0.08);
@@ -537,16 +613,21 @@ class ParticleField {
       this.vertexData[offset + 2] = size;
       this.vertexData[offset + 3] = brightness;
 
-      const trailOffset = i * 2 * FLOATS_PER_TRAIL_VERTEX;
-      const speed = Math.hypot(particle.vx, particle.vy);
-      const trailLength = Math.min(56, 8 + speed * 0.2) * this.trailFade;
-      const inverseSpeed = 1 / Math.max(speed, 0.001);
+      const trailOffset = i * 4 * FLOATS_PER_TRAIL_VERTEX;
+      const head = brightness * this.trailFade * 0.9;
+      const mid = brightness * this.trailFade * 0.4;
       this.trailData[trailOffset] = particle.x;
       this.trailData[trailOffset + 1] = particle.y;
-      this.trailData[trailOffset + 2] = brightness * this.trailFade * 0.85;
-      this.trailData[trailOffset + 3] = particle.x - particle.vx * inverseSpeed * trailLength;
-      this.trailData[trailOffset + 4] = particle.y - particle.vy * inverseSpeed * trailLength;
-      this.trailData[trailOffset + 5] = 0;
+      this.trailData[trailOffset + 2] = head;
+      this.trailData[trailOffset + 3] = particle.px;
+      this.trailData[trailOffset + 4] = particle.py;
+      this.trailData[trailOffset + 5] = mid;
+      this.trailData[trailOffset + 6] = particle.px;
+      this.trailData[trailOffset + 7] = particle.py;
+      this.trailData[trailOffset + 8] = mid;
+      this.trailData[trailOffset + 9] = particle.qx;
+      this.trailData[trailOffset + 10] = particle.qy;
+      this.trailData[trailOffset + 11] = 0;
     }
   }
 
@@ -614,7 +695,7 @@ class ParticleField {
     );
 
     gl.uniform2f(this.trailLocations.resolution, this.width, this.height);
-    gl.drawArrays(gl.LINES, 0, PARTICLE_COUNT * 2);
+    gl.drawArrays(gl.LINES, 0, PARTICLE_COUNT * 4);
   }
 }
 
