@@ -415,6 +415,9 @@ class ParticleField {
     this.flowBoost = 0;
     this.flowSpeed = 8;
     this.trailFade = 0;
+    this.bloomAge = 0;
+    this.disperse = 0;
+    this.didBurst = false;
 
     this.particleLocations = {
       position: gl.getAttribLocation(particleProgram, "a_position"),
@@ -444,6 +447,8 @@ class ParticleField {
         qy: 0,
         phase: Math.random() * TAU,
         lane: Math.random() * 2 - 1,
+        homeX: Math.random(),
+        homeY: Math.random(),
         size: 3 + Math.random() * 9,
         brightness: 0.35 + Math.random() * 0.65,
       });
@@ -465,6 +470,10 @@ class ParticleField {
     for (const particle of this.particles) {
       particle.x = oldWidth === 1 ? particle.x * width : (particle.x / oldWidth) * width;
       particle.y = oldHeight === 1 ? particle.y * height : (particle.y / oldHeight) * height;
+      particle.homeX =
+        oldWidth === 1 ? particle.homeX * width : (particle.homeX / oldWidth) * width;
+      particle.homeY =
+        oldHeight === 1 ? particle.homeY * height : (particle.homeY / oldHeight) * height;
       particle.px = particle.x;
       particle.py = particle.y;
       particle.qx = particle.x;
@@ -484,6 +493,9 @@ class ParticleField {
       this.glowPulse = 1;
       this.flowBoost = 1.35;
       this.trailFade = 1;
+      this.bloomAge = 0;
+      this.disperse = 0;
+      this.didBurst = false;
     }
   }
 
@@ -515,16 +527,37 @@ class ParticleField {
       blowLevel === 3 ? Math.min(1, this.trailFade + deltaSeconds * 4) : this.trailFade * Math.pow(0.9, frames);
 
     const bloom = blowLevel === 3;
+    if (bloom) {
+      this.bloomAge += deltaSeconds;
+      const disperseTarget = this.bloomAge < 0.7 ? 0 : Math.min(1, (this.bloomAge - 0.7) / 0.8);
+      this.disperse += (disperseTarget - this.disperse) * Math.min(1, 0.14 * frames);
+    } else {
+      this.bloomAge = 0;
+      this.disperse *= Math.pow(0.92, frames);
+    }
+
+    const gather = bloom ? 1 - this.disperse : 0;
     const centerX = this.width * 0.5;
     const throatY = this.height * 0.9;
-    const damping = Math.pow(bloom ? 0.972 : 0.965, frames);
+    const damping = Math.pow(bloom && gather > 0.55 ? 0.972 : 0.965, frames);
+
+    if (bloom && this.disperse > 0.2 && !this.didBurst) {
+      this.didBurst = true;
+      for (const particle of this.particles) {
+        const dx = particle.x - centerX;
+        const dy = particle.y - throatY;
+        const len = Math.max(18, Math.hypot(dx, dy));
+        particle.vx += (dx / len) * 220 + (Math.random() - 0.5) * 90;
+        particle.vy += (dy / len) * 160 - 30 + (Math.random() - 0.5) * 70;
+      }
+    }
 
     for (let i = 0; i < this.particles.length; i += 1) {
       const particle = this.particles[i];
       const waveA = Math.sin(elapsedSeconds * 0.72 + particle.phase + particle.y * 0.008);
       const waveB = Math.cos(elapsedSeconds * 0.51 - particle.phase * 1.7 + particle.x * 0.006);
 
-      if (bloom) {
+      if (gather > 0.02) {
         const rise = Math.max(0, Math.min(1.2, (throatY - particle.y) / Math.max(1, throatY)));
         const dx = particle.x - centerX;
         const theta = Math.atan2(dx, Math.max(12, throatY - particle.y));
@@ -542,21 +575,27 @@ class ParticleField {
         const speed = this.flowSpeed * (0.92 + rise * 0.4);
         const tx = (dxds / tanLen) * speed;
         const ty = (dyds / tanLen) * speed;
-        const steer = Math.min(1, 3.4 * deltaSeconds);
+        const steer = Math.min(1, 3.4 * deltaSeconds) * gather;
         particle.vx += (tx - particle.vx) * steer;
         particle.vy += (ty - particle.vy) * steer;
-        particle.vx += (targetX - particle.x) * 7 * deltaSeconds;
-        particle.vx += waveA * 4 * deltaSeconds;
-        particle.vy += waveB * 3 * deltaSeconds;
+        particle.vx += (targetX - particle.x) * 7 * gather * deltaSeconds;
+        particle.vx += waveA * 4 * gather * deltaSeconds;
+        particle.vy += waveB * 3 * gather * deltaSeconds;
         if (rise > 0.5) {
           const lip = Math.min(1, (rise - 0.5) / 0.5);
-          const curl = lip * lip * (3 - 2 * lip);
+          const curl = lip * lip * (3 - 2 * lip) * gather;
           particle.vx += particle.lane * this.flowSpeed * 1.15 * curl * deltaSeconds;
           particle.vy += this.flowSpeed * 0.72 * curl * deltaSeconds;
         }
-      } else {
-        particle.vx += (waveA * 7 + this.flowSpeed * 0.28) * deltaSeconds;
-        particle.vy += (waveB * 7 - this.flowSpeed * 0.86) * deltaSeconds;
+      }
+
+      const spread = bloom ? this.disperse : 1;
+      if (spread > 0.02) {
+        const homePull = bloom ? 1.15 * this.disperse : 0.22;
+        particle.vx += (waveA * 7 + this.flowSpeed * 0.28 * (bloom ? 0.35 : 1)) * spread * deltaSeconds;
+        particle.vy += (waveB * 7 - this.flowSpeed * 0.35 * (bloom ? 0.2 : 1)) * spread * deltaSeconds;
+        particle.vx += (particle.homeX - particle.x) * homePull * deltaSeconds;
+        particle.vy += (particle.homeY - particle.y) * homePull * deltaSeconds;
       }
 
       particle.vx *= damping;
@@ -566,7 +605,8 @@ class ParticleField {
 
       const margin = particle.size * 2;
       let wrapped = false;
-      if (bloom) {
+      const recycleFunnel = bloom && this.disperse < 0.42;
+      if (recycleFunnel) {
         const offTop = particle.y < -margin;
         const offSide = particle.x < -margin || particle.x > this.width + margin;
         if (offTop || offSide) {
@@ -581,10 +621,20 @@ class ParticleField {
           wrapped = true;
         }
       } else {
-        if (particle.x < -margin) particle.x = this.width + margin;
-        else if (particle.x > this.width + margin) particle.x = -margin;
-        if (particle.y < -margin) particle.y = this.height + margin;
-        else if (particle.y > this.height + margin) particle.y = -margin;
+        if (particle.x < -margin) {
+          particle.x = this.width + margin;
+          wrapped = true;
+        } else if (particle.x > this.width + margin) {
+          particle.x = -margin;
+          wrapped = true;
+        }
+        if (particle.y < -margin) {
+          particle.y = this.height + margin;
+          wrapped = true;
+        } else if (particle.y > this.height + margin) {
+          particle.y = -margin;
+          wrapped = true;
+        }
       }
 
       if (wrapped) {
