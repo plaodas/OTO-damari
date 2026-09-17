@@ -550,6 +550,37 @@ class ParticleField {
     this.swipeHeld = false;
   }
 
+  spawnAlongStem(particle) {
+    const t = 0.1 + Math.random() * 0.55;
+    const along = t * this.bloomLength;
+    const u = Math.max(0, (t - 0.14) / 0.86);
+    const half = Math.min(this.width, this.height) * (0.055 + 0.28 * u * u);
+    const across = particle.lane * half * (0.35 + Math.random() * 0.65);
+    particle.x = this.originX + this.axisX * along + this.perpX * across;
+    particle.y = this.originY + this.axisY * along + this.perpY * across;
+    particle.vx = this.axisX * this.flowSpeed * 0.85 + this.perpX * particle.lane * 18;
+    particle.vy = this.axisY * this.flowSpeed * 0.85 + this.perpY * particle.lane * 18;
+  }
+
+  wrapScreen(particle, margin) {
+    let wrapped = false;
+    if (particle.x < -margin) {
+      particle.x = this.width + margin;
+      wrapped = true;
+    } else if (particle.x > this.width + margin) {
+      particle.x = -margin;
+      wrapped = true;
+    }
+    if (particle.y < -margin) {
+      particle.y = this.height + margin;
+      wrapped = true;
+    } else if (particle.y > this.height + margin) {
+      particle.y = -margin;
+      wrapped = true;
+    }
+    return wrapped;
+  }
+
   impact(x, y) {
     for (const particle of this.particles) {
       const dx = particle.x - x;
@@ -638,7 +669,8 @@ class ParticleField {
         const flare = Math.pow(u, exponent);
         const flareDeriv = u <= 0 ? 0 : (exponent * Math.pow(u, exponent - 1)) / (1 - tube);
         const amp = Math.min(this.width, this.height) * 0.5 * petal;
-        const targetAcross = particle.lane * (Math.min(this.width, this.height) * 0.028 + amp * flare);
+        const tubeWidth = Math.min(this.width, this.height) * 0.055;
+        const targetAcross = particle.lane * (tubeWidth + amp * flare);
         const targetX = originX + axisX * along + perpX * targetAcross;
         const targetY = originY + axisY * along + perpY * targetAcross;
         const dalong = bloomLength;
@@ -652,10 +684,15 @@ class ParticleField {
         const steer = Math.min(1, 3.4 * deltaSeconds) * gather;
         particle.vx += (tx - particle.vx) * steer;
         particle.vy += (ty - particle.vy) * steer;
-        particle.vx += (targetX - particle.x) * 7 * gather * deltaSeconds;
-        particle.vy += (targetY - particle.y) * 7 * gather * deltaSeconds;
+        const pull = 7 * gather * Math.min(1, 0.18 + rise * 2.2);
+        particle.vx += (targetX - particle.x) * pull * deltaSeconds;
+        particle.vy += (targetY - particle.y) * pull * deltaSeconds;
         particle.vx += waveA * 4 * gather * deltaSeconds;
         particle.vy += waveB * 3 * gather * deltaSeconds;
+        if (along < bloomLength * 0.22) {
+          particle.vx += axisX * this.flowSpeed * 1.6 * gather * deltaSeconds;
+          particle.vy += axisY * this.flowSpeed * 1.6 * gather * deltaSeconds;
+        }
         if (rise > 0.5) {
           const lip = Math.min(1, (rise - 0.5) / 0.5);
           const curl = lip * lip * (3 - 2 * lip) * gather;
@@ -689,29 +726,19 @@ class ParticleField {
           particle.x > this.width + margin ||
           particle.y < -margin ||
           particle.y > this.height + margin;
-        if (offScreen || alongNow < -30 || alongNow > bloomLength * 1.12) {
-          const jitter = (Math.random() - 0.5) * Math.min(this.width, this.height) * 0.06;
-          particle.x = originX + axisX * Math.random() * 18 + perpX * jitter;
-          particle.y = originY + axisY * Math.random() * 18 + perpY * jitter;
-          particle.vx = axisX * this.flowSpeed * 0.55 + perpX * particle.lane * 12;
-          particle.vy = axisY * this.flowSpeed * 0.55 + perpY * particle.lane * 12;
+        if (alongNow < -30) {
+          this.spawnAlongStem(particle);
           wrapped = true;
+        } else if (offScreen || alongNow > bloomLength * 1.12) {
+          if (this.swipeHeld) {
+            wrapped = this.wrapScreen(particle, margin);
+          } else {
+            this.spawnAlongStem(particle);
+            wrapped = true;
+          }
         }
       } else {
-        if (particle.x < -margin) {
-          particle.x = this.width + margin;
-          wrapped = true;
-        } else if (particle.x > this.width + margin) {
-          particle.x = -margin;
-          wrapped = true;
-        }
-        if (particle.y < -margin) {
-          particle.y = this.height + margin;
-          wrapped = true;
-        } else if (particle.y > this.height + margin) {
-          particle.y = -margin;
-          wrapped = true;
-        }
+        wrapped = this.wrapScreen(particle, margin);
       }
 
       if (wrapped) {
