@@ -7,6 +7,13 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
     />
     <meta name="theme-color" content="#021a45" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="OTO溜まり" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>OTO溜まり</title>
     <style>
       * {
@@ -19,6 +26,11 @@
         width: 100%;
         height: 100%;
         margin: 0;
+      }
+
+      html,
+      body {
+        height: 100dvh;
       }
 
       body {

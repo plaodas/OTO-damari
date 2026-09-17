@@ -766,6 +766,12 @@ async function start() {
   requestAnimationFrame(frame);
 }
 
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch((error) => {
+    console.warn("Service Worker を登録できませんでした。", error);
+  });
+}
+
 start().catch((error) => {
   console.error("OTO溜まりを開始できませんでした。", error);
 });

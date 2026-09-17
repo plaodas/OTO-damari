@@ -39,6 +39,15 @@ __otoSetLevel(3) // シャラシャラ
 __otoSetLevel(null) // マイク入力へ戻す
 ```
 
+## ホーム画面に追加（PWA）
+
+HTTPS で開いたあと、ホーム画面に追加するとブラウザのアドレスバーと下部ツールバーが消えて全画面表示になります。Safari や Chrome のタブとして開いているあいだは、バーは残ります。
+
+- iPhone / iPad（Safari）: 共有 → ホーム画面に追加
+- Android（Chrome）: メニュー → アプリをインストール / ホーム画面に追加
+
+アイコンから起動すると `standalone` 表示になります。iPhone のホームインジケータと時刻・電池のステータスバーはシステムの一部なので残ります。
+
 ## ビルド
 
 ```bash
@@ -54,6 +63,11 @@ npm run preview
 .
 ├── index.html
 ├── main.js
+├── public
+│   ├── apple-touch-icon.png
+│   ├── icons
+│   ├── manifest.webmanifest
+│   └── sw.js
 └── shaders
     ├── particle.vert.glsl
     ├── particle.frag.glsl
