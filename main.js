@@ -418,6 +418,15 @@ class ParticleField {
     this.bloomAge = 0;
     this.disperse = 0;
     this.didBurst = false;
+    this.swipeActive = false;
+    this.swipeHeld = false;
+    this.originX = 0.5;
+    this.originY = 0.9;
+    this.axisX = 0;
+    this.axisY = -1;
+    this.perpX = 1;
+    this.perpY = 0;
+    this.bloomLength = 1;
 
     this.particleLocations = {
       position: gl.getAttribLocation(particleProgram, "a_position"),
@@ -499,6 +508,48 @@ class ParticleField {
     }
   }
 
+  setAxis(dx, dy) {
+    const length = Math.hypot(dx, dy);
+    if (length < 1) {
+      this.axisX = 0;
+      this.axisY = -1;
+    } else {
+      this.axisX = dx / length;
+      this.axisY = dy / length;
+    }
+    this.perpX = -this.axisY;
+    this.perpY = this.axisX;
+  }
+
+  setBlowOrigin() {
+    if (this.swipeHeld) return;
+    this.originX = this.width * 0.5;
+    this.originY = this.height * 0.9;
+    this.setAxis(0, -1);
+    this.bloomLength = Math.max(80, this.height * 0.88);
+  }
+
+  beginSwipe(x, y, toX, toY) {
+    this.swipeActive = true;
+    this.swipeHeld = true;
+    this.originX = x;
+    this.originY = y;
+    this.setAxis(toX - x, toY - y);
+    this.bloomLength = Math.max(this.height * 0.42, Math.hypot(toX - x, toY - y));
+    this.pulse("strong");
+  }
+
+  steerSwipe(x, y) {
+    const dx = x - this.originX;
+    const dy = y - this.originY;
+    this.setAxis(dx, dy);
+    this.bloomLength = Math.max(this.height * 0.42, Math.hypot(dx, dy));
+  }
+
+  releaseSwipe() {
+    this.swipeHeld = false;
+  }
+
   impact(x, y) {
     for (const particle of this.particles) {
       const dx = particle.x - x;
@@ -521,34 +572,50 @@ class ParticleField {
     this.waterSheen *= Math.pow(0.96, frames);
     this.flowBoost *= Math.pow(0.97, frames);
 
-    const flowTarget = [8, 11, 52, 132][blowLevel] + this.flowBoost * 36;
+    const flowLevel = blowLevel === 3 || this.swipeActive ? 3 : blowLevel;
+    const flowTarget = [8, 11, 52, 132][flowLevel] + this.flowBoost * 36;
     this.flowSpeed += (flowTarget - this.flowSpeed) * Math.min(1, 0.08 * frames);
-    this.trailFade =
-      blowLevel === 3 ? Math.min(1, this.trailFade + deltaSeconds * 4) : this.trailFade * Math.pow(0.9, frames);
 
-    const bloom = blowLevel === 3;
-    if (bloom) {
+    const blooming = blowLevel === 3 || this.swipeActive;
+    this.trailFade = blooming
+      ? Math.min(1, this.trailFade + deltaSeconds * 4)
+      : this.trailFade * Math.pow(0.9, frames);
+
+    if (blowLevel === 3) this.setBlowOrigin();
+
+    if (blooming) {
       this.bloomAge += deltaSeconds;
-      const disperseTarget = this.bloomAge < 0.7 ? 0 : Math.min(1, (this.bloomAge - 0.7) / 0.8);
-      this.disperse += (disperseTarget - this.disperse) * Math.min(1, 0.14 * frames);
+      if (this.swipeHeld) {
+        this.bloomAge = Math.min(this.bloomAge, 0.5);
+        this.disperse = 0;
+        this.didBurst = false;
+      } else {
+        const disperseTarget = this.bloomAge < 0.7 ? 0 : Math.min(1, (this.bloomAge - 0.7) / 0.8);
+        this.disperse += (disperseTarget - this.disperse) * Math.min(1, 0.14 * frames);
+      }
     } else {
       this.bloomAge = 0;
       this.disperse *= Math.pow(0.92, frames);
     }
 
-    const gather = bloom ? 1 - this.disperse : 0;
-    const centerX = this.width * 0.5;
-    const throatY = this.height * 0.9;
-    const damping = Math.pow(bloom && gather > 0.55 ? 0.972 : 0.965, frames);
+    const gather = blooming ? 1 - this.disperse : 0;
+    const originX = this.originX;
+    const originY = this.originY;
+    const axisX = this.axisX;
+    const axisY = this.axisY;
+    const perpX = this.perpX;
+    const perpY = this.perpY;
+    const bloomLength = Math.max(80, this.bloomLength);
+    const damping = Math.pow(blooming && gather > 0.55 ? 0.972 : 0.965, frames);
 
-    if (bloom && this.disperse > 0.2 && !this.didBurst) {
+    if (blooming && this.disperse > 0.2 && !this.didBurst) {
       this.didBurst = true;
       for (const particle of this.particles) {
-        const dx = particle.x - centerX;
-        const dy = particle.y - throatY;
+        const dx = particle.x - originX;
+        const dy = particle.y - originY;
         const len = Math.max(18, Math.hypot(dx, dy));
         particle.vx += (dx / len) * 220 + (Math.random() - 0.5) * 90;
-        particle.vy += (dy / len) * 160 - 30 + (Math.random() - 0.5) * 70;
+        particle.vy += (dy / len) * 160 + (Math.random() - 0.5) * 70;
       }
     }
 
@@ -558,42 +625,50 @@ class ParticleField {
       const waveB = Math.cos(elapsedSeconds * 0.51 - particle.phase * 1.7 + particle.x * 0.006);
 
       if (gather > 0.02) {
-        const rise = Math.max(0, Math.min(1.2, (throatY - particle.y) / Math.max(1, throatY)));
-        const dx = particle.x - centerX;
-        const theta = Math.atan2(dx, Math.max(12, throatY - particle.y));
+        const relX = particle.x - originX;
+        const relY = particle.y - originY;
+        const along = relX * axisX + relY * axisY;
+        const across = relX * perpX + relY * perpY;
+        const rise = Math.max(0, Math.min(1.2, along / bloomLength));
+        const theta = Math.atan2(across, Math.max(12, along));
         const petal = 0.86 + 0.14 * Math.pow(Math.abs(Math.cos(theta * 2.5)), 1.1);
         const tube = 0.14;
         const u = Math.max(0, (rise - tube) / (1 - tube));
         const exponent = 2.7;
         const flare = Math.pow(u, exponent);
         const flareDeriv = u <= 0 ? 0 : (exponent * Math.pow(u, exponent - 1)) / (1 - tube);
-        const amp = this.width * 0.5 * petal;
-        const targetX = centerX + particle.lane * (this.width * 0.028 + amp * flare);
-        const dxds = particle.lane * amp * flareDeriv;
-        const dyds = -throatY;
-        const tanLen = Math.hypot(dxds, dyds) || 1;
+        const amp = Math.min(this.width, this.height) * 0.5 * petal;
+        const targetAcross = particle.lane * (Math.min(this.width, this.height) * 0.028 + amp * flare);
+        const targetX = originX + axisX * along + perpX * targetAcross;
+        const targetY = originY + axisY * along + perpY * targetAcross;
+        const dalong = bloomLength;
+        const dacross = particle.lane * amp * flareDeriv;
+        const txx = axisX * dalong + perpX * dacross;
+        const tyy = axisY * dalong + perpY * dacross;
+        const tanLen = Math.hypot(txx, tyy) || 1;
         const speed = this.flowSpeed * (0.92 + rise * 0.4);
-        const tx = (dxds / tanLen) * speed;
-        const ty = (dyds / tanLen) * speed;
+        const tx = (txx / tanLen) * speed;
+        const ty = (tyy / tanLen) * speed;
         const steer = Math.min(1, 3.4 * deltaSeconds) * gather;
         particle.vx += (tx - particle.vx) * steer;
         particle.vy += (ty - particle.vy) * steer;
         particle.vx += (targetX - particle.x) * 7 * gather * deltaSeconds;
+        particle.vy += (targetY - particle.y) * 7 * gather * deltaSeconds;
         particle.vx += waveA * 4 * gather * deltaSeconds;
         particle.vy += waveB * 3 * gather * deltaSeconds;
         if (rise > 0.5) {
           const lip = Math.min(1, (rise - 0.5) / 0.5);
           const curl = lip * lip * (3 - 2 * lip) * gather;
-          particle.vx += particle.lane * this.flowSpeed * 1.15 * curl * deltaSeconds;
-          particle.vy += this.flowSpeed * 0.72 * curl * deltaSeconds;
+          particle.vx += (perpX * particle.lane * 1.15 - axisX * 0.72) * this.flowSpeed * curl * deltaSeconds;
+          particle.vy += (perpY * particle.lane * 1.15 - axisY * 0.72) * this.flowSpeed * curl * deltaSeconds;
         }
       }
 
-      const spread = bloom ? this.disperse : 1;
+      const spread = blooming ? this.disperse : 1;
       if (spread > 0.02) {
-        const homePull = bloom ? 1.15 * this.disperse : 0.22;
-        particle.vx += (waveA * 7 + this.flowSpeed * 0.28 * (bloom ? 0.35 : 1)) * spread * deltaSeconds;
-        particle.vy += (waveB * 7 - this.flowSpeed * 0.35 * (bloom ? 0.2 : 1)) * spread * deltaSeconds;
+        const homePull = blooming ? 1.15 * this.disperse : 0.22;
+        particle.vx += (waveA * 7 + this.flowSpeed * 0.28 * (blooming ? 0.35 : 1)) * spread * deltaSeconds;
+        particle.vy += (waveB * 7 - this.flowSpeed * 0.35 * (blooming ? 0.2 : 1)) * spread * deltaSeconds;
         particle.vx += (particle.homeX - particle.x) * homePull * deltaSeconds;
         particle.vy += (particle.homeY - particle.y) * homePull * deltaSeconds;
       }
@@ -605,19 +680,21 @@ class ParticleField {
 
       const margin = particle.size * 2;
       let wrapped = false;
-      const recycleFunnel = bloom && this.disperse < 0.42;
+      const recycleFunnel = blooming && this.disperse < 0.42;
       if (recycleFunnel) {
-        const offTop = particle.y < -margin;
-        const offSide = particle.x < -margin || particle.x > this.width + margin;
-        if (offTop || offSide) {
-          particle.x = centerX + (Math.random() - 0.5) * this.width * 0.07;
-          particle.y = throatY + Math.random() * this.height * 0.05;
-          particle.vx = particle.lane * 12;
-          particle.vy = -this.flowSpeed * 0.55;
-          wrapped = true;
-        } else if (particle.y > this.height + margin) {
-          particle.y = throatY;
-          particle.x = centerX + (Math.random() - 0.5) * this.width * 0.06;
+        const alongNow =
+          (particle.x - originX) * axisX + (particle.y - originY) * axisY;
+        const offScreen =
+          particle.x < -margin ||
+          particle.x > this.width + margin ||
+          particle.y < -margin ||
+          particle.y > this.height + margin;
+        if (offScreen || alongNow < -30 || alongNow > bloomLength * 1.12) {
+          const jitter = (Math.random() - 0.5) * Math.min(this.width, this.height) * 0.06;
+          particle.x = originX + axisX * Math.random() * 18 + perpX * jitter;
+          particle.y = originY + axisY * Math.random() * 18 + perpY * jitter;
+          particle.vx = axisX * this.flowSpeed * 0.55 + perpX * particle.lane * 12;
+          particle.vy = axisY * this.flowSpeed * 0.55 + perpY * particle.lane * 12;
           wrapped = true;
         }
       } else {
@@ -652,10 +729,10 @@ class ParticleField {
       }
 
       const size =
-        particle.size * (1 + this.sizePulse * 0.5 + (blowLevel === 3 ? 0.18 : 0) + blowEnergy * 0.08);
+        particle.size * (1 + this.sizePulse * 0.5 + (blooming ? 0.18 : 0) + blowEnergy * 0.08);
       const brightness =
         particle.brightness *
-        (0.52 + this.glowPulse * 0.95 + blowLevel * 0.12 + waveA * 0.06);
+        (0.52 + this.glowPulse * 0.95 + (blooming ? 3 : blowLevel) * 0.12 + waveA * 0.06);
 
       const offset = i * FLOATS_PER_PARTICLE;
       this.vertexData[offset] = particle.x;
@@ -678,6 +755,10 @@ class ParticleField {
       this.trailData[trailOffset + 9] = particle.qx;
       this.trailData[trailOffset + 10] = particle.qy;
       this.trailData[trailOffset + 11] = 0;
+    }
+
+    if (this.swipeActive && !this.swipeHeld && this.disperse > 0.92) {
+      this.swipeActive = false;
     }
   }
 
@@ -848,10 +929,37 @@ async function start() {
   resize();
 
   let inputStarted = false;
+  let pointer = null;
+
+  function localPoint(event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }
+
+  function endPointer(event) {
+    if (!pointer) return;
+    if (event && pointer.id != null && event.pointerId !== pointer.id) return;
+    if (pointer.swiping) {
+      particles.releaseSwipe();
+      if (mic.level !== 3) synth.stopShimmer();
+    }
+    pointer = null;
+  }
+
   canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    particles.impact(event.clientX - rect.left, event.clientY - rect.top);
+    const point = localPoint(event);
+    pointer = {
+      id: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      swiping: false,
+    };
+    particles.impact(point.x, point.y);
+    canvas.setPointerCapture?.(event.pointerId);
 
     const context = synth.unlock();
     synth.playTap();
@@ -860,6 +968,26 @@ async function start() {
       mic.start(context);
     }
   });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!pointer || event.pointerId !== pointer.id) return;
+    event.preventDefault();
+    const point = localPoint(event);
+    const distance = Math.hypot(point.x - pointer.startX, point.y - pointer.startY);
+    if (!pointer.swiping && distance > 28) {
+      pointer.swiping = true;
+      particles.beginSwipe(pointer.startX, pointer.startY, point.x, point.y);
+      synth.unlock();
+      synth.playKirari();
+      if (mic.level !== 3) synth.startShimmer();
+    }
+    if (pointer.swiping) particles.steerSwipe(point.x, point.y);
+  });
+
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  window.addEventListener("pointerup", endPointer);
+  window.addEventListener("pointercancel", endPointer);
 
   let previousTime = performance.now();
   const startedAt = previousTime;
