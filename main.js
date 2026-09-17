@@ -177,14 +177,71 @@ class HybridSynth {
     oscillator.stop(startAt + decay + 0.03);
   }
 
+  playKarplus(startAt, frequency, peak, duration, options = {}) {
+    if (!this.context || !this.master || !this.noiseBuffer) return;
+
+    const burst = options.burst ?? 0.008;
+    const cutoff = options.cutoff ?? 4200;
+    const feedbackAmount = options.feedback ?? 0.84;
+    const delayTime = Math.max(1 / this.context.sampleRate, 1 / frequency);
+    const delay = this.context.createDelay(0.05);
+    const filter = this.context.createBiquadFilter();
+    const feedback = this.context.createGain();
+    const output = this.context.createGain();
+    const noise = this.context.createBufferSource();
+    const noiseGain = this.context.createGain();
+
+    delay.delayTime.setValueAtTime(delayTime, startAt);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, startAt);
+    filter.Q.setValueAtTime(0.707, startAt);
+    feedback.gain.setValueAtTime(feedbackAmount, startAt);
+    feedback.gain.setValueAtTime(feedbackAmount, startAt + duration);
+    feedback.gain.linearRampToValueAtTime(0, startAt + duration + 0.03);
+    noise.buffer = this.noiseBuffer;
+
+    noiseGain.gain.setValueAtTime(Math.max(0.0002, peak), startAt);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, startAt + burst);
+    output.gain.setValueAtTime(Math.max(0.0002, peak), startAt);
+    output.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+
+    noise.connect(noiseGain);
+    noiseGain.connect(delay);
+    delay.connect(filter);
+    filter.connect(feedback);
+    feedback.connect(delay);
+    filter.connect(output);
+    output.connect(this.master);
+
+    noise.start(startAt);
+    noise.stop(startAt + burst + 0.02);
+
+    window.setTimeout(() => {
+      feedback.gain.value = 0;
+      try {
+        noise.disconnect();
+      } catch {
+        // already disconnected
+      }
+      noiseGain.disconnect();
+      delay.disconnect();
+      filter.disconnect();
+      feedback.disconnect();
+      output.disconnect();
+    }, (duration + 0.08) * 1000);
+  }
+
   playChirin() {
     const context = this.unlock();
     if (!context || !this.master) return;
     const startAt = context.currentTime;
-    this.playPartial(startAt, 2200, 0.09, 0.08);
-    this.playPartial(startAt, 2200 * 2.11, 0.032, 0.055);
-    this.playPartial(startAt, 2200 * 3.27, 0.016, 0.04);
-    this.playPartial(startAt, 2200 * 0.53, 0.028, 0.09);
+    this.playKarplus(startAt, 2200, 0.11, 0.11, {
+      burst: 0.008,
+      cutoff: 4500,
+      feedback: 0.84,
+    });
+    this.playPartial(startAt, 2200, 0.032, 0.08);
+    this.playPartial(startAt, 2200 * 2.11, 0.012, 0.05);
   }
 
   playKirari() {
@@ -192,9 +249,12 @@ class HybridSynth {
     if (!context || !this.master) return;
     const startAt = context.currentTime;
 
-    this.playPartial(startAt, 1600, 0.07, 0.12);
-    this.playPartial(startAt, 1600 * 2.04, 0.028, 0.08);
-    this.playPartial(startAt, 1600 * 0.48, 0.022, 0.1);
+    this.playKarplus(startAt, 1600, 0.09, 0.14, {
+      burst: 0.01,
+      cutoff: 4000,
+      feedback: 0.8,
+    });
+    this.playPartial(startAt, 1600, 0.025, 0.1);
 
     const carrier = context.createOscillator();
     const modulator = context.createOscillator();
@@ -233,8 +293,13 @@ class HybridSynth {
     const context = this.unlock();
     if (!context || !this.master) return;
     const startAt = context.currentTime;
-    this.playPartial(startAt, 2480, 0.055, 0.055);
-    this.playPartial(startAt, 2480 * 2.07, 0.018, 0.04);
+    const frequency = 2300 + Math.random() * 400;
+    this.playKarplus(startAt, frequency, 0.08, 0.085, {
+      burst: 0.006,
+      cutoff: 4800,
+      feedback: 0.82,
+    });
+    this.playPartial(startAt, frequency, 0.016, 0.045);
   }
 
   startShimmer() {
@@ -266,7 +331,7 @@ class HybridSynth {
     }
 
     source.start();
-    this.grain = { source, voices };
+    this.grain = { source, voices, ksUntil: 8 };
     this.grainAhead = context.currentTime;
     this.grainVoice = 0;
   }
@@ -288,6 +353,15 @@ class HybridSynth {
         voice.panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), time);
       }
       this.playEnvelope(voice.gain, time, peak, decay);
+      this.grain.ksUntil -= 1;
+      if (this.grain.ksUntil <= 0) {
+        this.playKarplus(time, 1800 + Math.random() * 900, 0.02, 0.06, {
+          burst: 0.005,
+          cutoff: 5000,
+          feedback: 0.78,
+        });
+        this.grain.ksUntil = 8 + Math.floor(Math.random() * 3);
+      }
       this.grainVoice = (this.grainVoice + 1) % this.grain.voices.length;
       this.grainAhead = time + 0.014 + Math.random() * 0.006;
     }
