@@ -1,8 +1,9 @@
-const MAX_DIMENSION = 256;
+const MAX_DIMENSION = 280;
 
 function boxBlur(source, width, height, radius) {
   const horizontal = new Float32Array(source.length);
   const output = new Float32Array(source.length);
+  const span = radius * 2 + 1;
 
   for (let y = 0; y < height; y += 1) {
     let sum = 0;
@@ -10,7 +11,7 @@ function boxBlur(source, width, height, radius) {
       sum += source[y * width + Math.max(0, Math.min(width - 1, x))];
     }
     for (let x = 0; x < width; x += 1) {
-      horizontal[y * width + x] = sum / (radius * 2 + 1);
+      horizontal[y * width + x] = sum / span;
       const removeX = Math.max(0, x - radius);
       const addX = Math.min(width - 1, x + radius + 1);
       sum += source[y * width + addX] - source[y * width + removeX];
@@ -23,7 +24,7 @@ function boxBlur(source, width, height, radius) {
       sum += horizontal[Math.max(0, Math.min(height - 1, y)) * width + x];
     }
     for (let y = 0; y < height; y += 1) {
-      output[y * width + x] = sum / (radius * 2 + 1);
+      output[y * width + x] = sum / span;
       const removeY = Math.max(0, y - radius);
       const addY = Math.min(height - 1, y + radius + 1);
       sum += horizontal[addY * width + x] - horizontal[removeY * width + x];
@@ -34,8 +35,9 @@ function boxBlur(source, width, height, radius) {
 }
 
 function sobel(source, width, height) {
-  const output = new Float32Array(source.length);
-  let max = 1e-5;
+  const mag = new Float32Array(source.length);
+  const gxOut = new Float32Array(source.length);
+  const gyOut = new Float32Array(source.length);
 
   for (let y = 1; y < height - 1; y += 1) {
     for (let x = 1; x < width - 1; x += 1) {
@@ -54,79 +56,301 @@ function sobel(source, width, height) {
         source[i + width - 1] +
         source[i + width] * 2 +
         source[i + width + 1];
-      const strength = Math.hypot(gx, gy);
-      output[i] = strength;
-      max = Math.max(max, strength);
+      gxOut[i] = gx;
+      gyOut[i] = gy;
+      mag[i] = Math.hypot(gx, gy);
     }
   }
 
-  const scale = 1 / Math.max(0.24, max * 0.7);
-  for (let i = 0; i < output.length; i += 1) {
-    output[i] = Math.min(1, output[i] * scale);
+  return { mag, gx: gxOut, gy: gyOut };
+}
+
+function nonMaxSuppression(mag, gx, gy, width, height) {
+  const output = new Float32Array(mag.length);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const i = y * width + x;
+      const m = mag[i];
+      if (m <= 1e-6) continue;
+      const ax = Math.abs(gx[i]);
+      const ay = Math.abs(gy[i]);
+      let a = 0;
+      let b = 0;
+      if (ax > ay * 2.414) {
+        a = mag[i - 1];
+        b = mag[i + 1];
+      } else if (ay > ax * 2.414) {
+        a = mag[i - width];
+        b = mag[i + width];
+      } else if (gx[i] * gy[i] > 0) {
+        a = mag[i - width - 1];
+        b = mag[i + width + 1];
+      } else {
+        a = mag[i - width + 1];
+        b = mag[i + width - 1];
+      }
+      if (m >= a && m >= b) output[i] = m;
+    }
   }
   return output;
 }
 
-function createParticleTargets(edge, width, height, targetCount) {
-  const candidates = [];
-  let totalWeight = 0;
+function percentile(values, ratio) {
+  if (values.length === 0) return 0;
+  const copy = values.slice().sort((a, b) => a - b);
+  const index = Math.max(0, Math.min(copy.length - 1, Math.floor((copy.length - 1) * ratio)));
+  return copy[index];
+}
 
-  for (let y = 2; y < height - 2; y += 2) {
-    for (let x = 2; x < width - 2; x += 2) {
-      const index = y * width + x;
-      const strength = edge[index];
-      if (strength < 0.24) continue;
+function hysteresis(nms, width, height, low, high) {
+  const keep = new Uint8Array(nms.length);
+  const queue = [];
+  for (let i = 0; i < nms.length; i += 1) {
+    if (nms[i] >= high) {
+      keep[i] = 1;
+      queue.push(i);
+    }
+  }
 
-      let localMax = true;
-      for (let oy = -2; oy <= 2 && localMax; oy += 1) {
-        for (let ox = -2; ox <= 2; ox += 1) {
-          if (edge[(y + oy) * width + x + ox] > strength + 0.035) {
-            localMax = false;
-            break;
-          }
-        }
+  const widthM = width;
+  while (queue.length > 0) {
+    const i = queue.pop();
+    const x = i % widthM;
+    const y = (i / widthM) | 0;
+    for (let oy = -1; oy <= 1; oy += 1) {
+      for (let ox = -1; ox <= 1; ox += 1) {
+        if (ox === 0 && oy === 0) continue;
+        const sx = x + ox;
+        const sy = y + oy;
+        if (sx < 1 || sy < 1 || sx >= width - 1 || sy >= height - 1) continue;
+        const n = sy * widthM + sx;
+        if (keep[n] || nms[n] < low) continue;
+        keep[n] = 1;
+        queue.push(n);
       }
-      if (!localMax) continue;
-
-      const nx = x / width - 0.5;
-      const ny = y / height - 0.5;
-      const centerWeight = Math.max(0.35, 1 - Math.hypot(nx, ny) * 0.75);
-      const weight = strength * strength * centerWeight;
-      totalWeight += weight;
-      candidates.push({ x, y, strength, totalWeight });
     }
   }
+  return keep;
+}
 
-  if (candidates.length === 0) {
-    candidates.push({ x: width * 0.5, y: height * 0.5, strength: 0.5, totalWeight: 1 });
-    totalWeight = 1;
+function collectContour(keep, nms, width, height) {
+  const points = [];
+  let cx = 0;
+  let cy = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const i = y * width + x;
+      if (!keep[i]) continue;
+      points.push({ x, y, strength: nms[i] });
+      cx += x;
+      cy += y;
+    }
   }
+  if (points.length === 0) return points;
+  cx /= points.length;
+  cy /= points.length;
+  points.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  return points;
+}
 
+function packTargets(contour, width, height, targetCount) {
   const pixels = new Uint8Array(targetCount * 4);
-  for (let i = 0; i < targetCount; i += 1) {
-    const sample = ((i * 0.61803398875 + 0.17) % 1) * totalWeight;
-    let low = 0;
-    let high = candidates.length - 1;
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if (candidates[middle].totalWeight < sample) low = middle + 1;
-      else high = middle;
-    }
+  if (contour.length === 0) return pixels;
 
-    const target = candidates[low];
-    const jitter = (i % 5) - 2;
+  for (let i = 0; i < targetCount; i += 1) {
+    const t = (i + 0.5) / targetCount;
+    const at = t * contour.length;
+    const index = Math.min(contour.length - 1, at | 0);
+    const next = (index + 1) % contour.length;
+    const mix = at - index;
+    const a = contour[index];
+    const b = contour[next];
+    const x = a.x + (b.x - a.x) * mix;
+    const y = a.y + (b.y - a.y) * mix;
+    const tx = b.x - contour[(index + contour.length - 1) % contour.length].x;
+    const ty = b.y - contour[(index + contour.length - 1) % contour.length].y;
+    const len = Math.hypot(tx, ty) || 1;
+    const ribbon = ((i % 3) - 1) * 1.15;
+    const px = x + (-ty / len) * ribbon;
+    const py = y + (tx / len) * ribbon;
     const offset = i * 4;
-    pixels[offset] = Math.round(
-      Math.max(0, Math.min(255, ((target.x + jitter * 0.32) / width) * 255)),
-    );
-    pixels[offset + 1] = Math.round(
-      Math.max(0, Math.min(255, ((target.y + jitter * 0.18) / height) * 255)),
-    );
-    pixels[offset + 2] = Math.round(target.strength * 255);
+    pixels[offset] = Math.round(Math.max(0, Math.min(255, (px / width) * 255)));
+    pixels[offset + 1] = Math.round(Math.max(0, Math.min(255, (py / height) * 255)));
+    pixels[offset + 2] = 255;
     pixels[offset + 3] = 255;
   }
-
   return pixels;
+}
+
+function floodBackground(coarse, width, height) {
+  const background = new Uint8Array(coarse.length);
+  const queue = [];
+  let borderSum = 0;
+  let borderCount = 0;
+  const band = 5;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (x >= band && y >= band && x < width - band && y < height - band) continue;
+      const i = y * width + x;
+      borderSum += coarse[i];
+      borderCount += 1;
+      background[i] = 1;
+      queue.push(i);
+    }
+  }
+  const border = borderSum / Math.max(1, borderCount);
+  const similar = 0.09;
+  while (queue.length > 0) {
+    const i = queue.pop();
+    const x = i % width;
+    const y = (i / width) | 0;
+    for (let oy = -1; oy <= 1; oy += 1) {
+      for (let ox = -1; ox <= 1; ox += 1) {
+        if (ox === 0 && oy === 0) continue;
+        const sx = x + ox;
+        const sy = y + oy;
+        if (sx < 0 || sy < 0 || sx >= width || sy >= height) continue;
+        const n = sy * width + sx;
+        if (background[n]) continue;
+        if (Math.abs(coarse[n] - coarse[i]) > similar) continue;
+        if (Math.abs(coarse[n] - border) > 0.16) continue;
+        background[n] = 1;
+        queue.push(n);
+      }
+    }
+  }
+  return background;
+}
+
+function largestForeground(background, width, height) {
+  const seen = new Uint8Array(background.length);
+  let best = [];
+  for (let start = 0; start < background.length; start += 1) {
+    if (background[start] || seen[start]) continue;
+    const stack = [start];
+    const cells = [];
+    seen[start] = 1;
+    while (stack.length > 0) {
+      const i = stack.pop();
+      cells.push(i);
+      const x = i % width;
+      const y = (i / width) | 0;
+      if (x > 0 && !background[i - 1] && !seen[i - 1]) {
+        seen[i - 1] = 1;
+        stack.push(i - 1);
+      }
+      if (x < width - 1 && !background[i + 1] && !seen[i + 1]) {
+        seen[i + 1] = 1;
+        stack.push(i + 1);
+      }
+      if (y > 0 && !background[i - width] && !seen[i - width]) {
+        seen[i - width] = 1;
+        stack.push(i - width);
+      }
+      if (y < height - 1 && !background[i + width] && !seen[i + width]) {
+        seen[i + width] = 1;
+        stack.push(i + width);
+      }
+    }
+    if (cells.length > best.length) best = cells;
+  }
+
+  const mask = new Uint8Array(background.length);
+  const minSize = width * height * 0.035;
+  if (best.length < minSize || best.length > width * height * 0.82) return mask;
+  for (const i of best) mask[i] = 1;
+  return mask;
+}
+
+function traceBoundary(keep, width, height) {
+  let start = -1;
+  for (let i = 0; i < keep.length; i += 1) {
+    if (keep[i]) {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return [];
+
+  const dirs = [
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [-1, 1],
+    [-1, 0],
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+  ];
+  const points = [];
+  let x = start % width;
+  let y = (start / width) | 0;
+  const startX = x;
+  const startY = y;
+  let dir = 0;
+
+  for (let step = 0; step < keep.length; step += 1) {
+    points.push({ x, y, strength: 1 });
+    let found = false;
+    for (let k = 0; k < 8; k += 1) {
+      const nextDir = (dir + 6 + k) % 8;
+      const nx = x + dirs[nextDir][0];
+      const ny = y + dirs[nextDir][1];
+      if (nx < 1 || ny < 1 || nx >= width - 1 || ny >= height - 1) continue;
+      if (!keep[ny * width + nx]) continue;
+      x = nx;
+      y = ny;
+      dir = nextDir;
+      found = true;
+      break;
+    }
+    if (!found) break;
+    if (points.length > 16 && x === startX && y === startY) break;
+  }
+  return points;
+}
+
+function silhouette(mask, width, height) {
+  const keep = new Uint8Array(mask.length);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const i = y * width + x;
+      if (!mask[i]) continue;
+      if (!mask[i - 1] || !mask[i + 1] || !mask[i - width] || !mask[i + width]) {
+        keep[i] = 1;
+      }
+    }
+  }
+  return traceBoundary(keep, width, height);
+}
+
+function extractContour(luminance, width, height) {
+  const coarse = boxBlur(boxBlur(luminance, width, height, 5), width, height, 3);
+  const background = floodBackground(coarse, width, height);
+  const subject = largestForeground(background, width, height);
+  const outline = silhouette(subject, width, height);
+  if (outline.length >= 60) return outline;
+
+  const { mag, gx, gy } = sobel(coarse, width, height);
+  const nms = nonMaxSuppression(mag, gx, gy, width, height);
+  const positives = [];
+  for (let i = 0; i < nms.length; i += 1) {
+    if (nms[i] > 0) positives.push(nms[i]);
+  }
+  const high = Math.max(0.015, percentile(positives, 0.86));
+  const keep = hysteresis(nms, width, height, high * 0.4, high);
+  const contour = collectContour(keep, nms, width, height);
+  if (contour.length >= 80) return contour;
+
+  const ranked = [];
+  for (let i = 0; i < nms.length; i += 1) {
+    if (nms[i] > 0) ranked.push({ i, v: nms[i] });
+  }
+  ranked.sort((a, b) => b.v - a.v);
+  const fallback = new Uint8Array(nms.length);
+  const take = Math.min(ranked.length, Math.max(160, Math.floor(ranked.length * 0.04)));
+  for (let n = 0; n < take; n += 1) fallback[ranked[n].i] = 1;
+  return collectContour(fallback, nms, width, height);
 }
 
 export function estimateDepthEdges(
@@ -136,9 +360,9 @@ export function estimateDepthEdges(
   targetCount,
   mirror = false,
 ) {
-  const aspect = Math.max(0.5, Math.min(2, viewportWidth / viewportHeight));
-  const width = aspect >= 1 ? MAX_DIMENSION : Math.max(128, Math.round(MAX_DIMENSION * aspect));
-  const height = aspect >= 1 ? Math.max(128, Math.round(MAX_DIMENSION / aspect)) : MAX_DIMENSION;
+  const aspect = Math.max(0.5, Math.min(2, viewportWidth / Math.max(1, viewportHeight)));
+  const width = aspect >= 1 ? MAX_DIMENSION : Math.max(160, Math.round(MAX_DIMENSION * aspect));
+  const height = aspect >= 1 ? Math.max(160, Math.round(MAX_DIMENSION / aspect)) : MAX_DIMENSION;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -156,10 +380,8 @@ export function estimateDepthEdges(
   if (mirror) {
     context.translate(width, 0);
     context.scale(-1, 1);
-    context.drawImage(source, drawX, drawY, drawWidth, drawHeight);
-  } else {
-    context.drawImage(source, drawX, drawY, drawWidth, drawHeight);
   }
+  context.drawImage(source, drawX, drawY, drawWidth, drawHeight);
   context.restore();
 
   const image = context.getImageData(0, 0, width, height);
@@ -173,29 +395,10 @@ export function estimateDepthEdges(
       255;
   }
 
-  const local = boxBlur(luminance, width, height, 2);
-  const broad = boxBlur(luminance, width, height, 10);
-  const relativeDepth = new Float32Array(luminance.length);
-  for (let i = 0; i < relativeDepth.length; i += 1) {
-    const x = (i % width) / width - 0.5;
-    const y = Math.floor(i / width) / height - 0.5;
-    const centerPrior = Math.max(0, 1 - Math.hypot(x, y) * 1.4);
-    relativeDepth[i] = Math.max(
-      0,
-      Math.min(1, 0.54 * broad[i] + 0.3 * local[i] + 0.16 * centerPrior),
-    );
-  }
-
-  const colorEdges = sobel(local, width, height);
-  const depthEdges = sobel(relativeDepth, width, height);
-  const edges = new Float32Array(luminance.length);
-  for (let i = 0; i < edges.length; i += 1) {
-    edges[i] = Math.min(1, colorEdges[i] * 0.62 + depthEdges[i] * 0.78);
-  }
-
+  const contour = extractContour(luminance, width, height);
   return {
     width: targetCount,
     height: 1,
-    pixels: createParticleTargets(edges, width, height, targetCount),
+    pixels: packTargets(contour, width, height, targetCount),
   };
 }

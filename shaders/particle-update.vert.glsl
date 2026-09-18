@@ -35,6 +35,8 @@ void main() {
   vec2 pos = a_position;
   vec2 vel = a_velocity;
   float ambient = step(0.52, fract(a_phase * 1.17 + a_home.x * 0.73));
+  vec4 photo = texelFetch(u_photoField, ivec2(gl_VertexID, 0), 0);
+  float photoHold = u_photoAmount * photo.a;
   float spread = ambient > 0.5 ? 1.0 : (u_blooming > 0.5 ? u_disperse : 1.0);
   vec2 rel = pos - u_origin;
   float along = dot(rel, u_axis);
@@ -45,10 +47,10 @@ void main() {
   if (u_hasField > 0.5) {
     vec2 field = texture(u_velocity, clamp(vec2(pos.x, 1.0 - pos.y), 0.002, 0.998)).xy;
     field.y = -field.y;
-    vel += field * mix(1.0, 0.08, ambient);
+    vel += field * mix(1.0, 0.08, ambient) * (1.0 - photoHold * 0.92);
   }
 
-  if (u_gather > 0.02 && ambient < 0.5) {
+  if (u_gather > 0.02 && ambient < 0.5 && photoHold < 0.2) {
     float theta = atan(across, max(0.012, along));
     float petal = 0.86 + 0.14 * pow(abs(cos(theta * 2.5)), 1.1);
     float tube = 0.14;
@@ -66,7 +68,7 @@ void main() {
     if (along < bloom * 0.22) vel += u_axis * u_flowSpeed * 1.6 * u_gather * u_dt;
   }
 
-  if (spread > 0.02) {
+  if (spread > 0.02 && photoHold < 0.18) {
     float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
     float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
     float homePull = ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22);
@@ -75,22 +77,20 @@ void main() {
     vel += (a_home - pos) * homePull * u_dt;
   }
 
-  if (u_photoAmount > 0.001) {
-    vec4 photo = texelFetch(u_photoField, ivec2(gl_VertexID, 0), 0);
+  if (photoHold > 0.001) {
     vec2 edgeTarget = photo.rg;
-    float order = fract(a_phase * 0.6180339 + a_home.x * 0.37);
-    float revealed = smoothstep(order, min(1.0, order + 0.18), u_photoAmount);
-    float attraction = revealed * photo.a * mix(0.75, 1.2, photo.b);
-    vel += (edgeTarget - pos) * attraction * 5.4 * u_dt;
-    vel *= max(0.66, 1.0 - attraction * 2.5 * u_dt);
+    float revealed = smoothstep(0.0, 0.55, photoHold);
+    float arrive = (1.0 - exp(-u_dt * mix(2.4, 7.5, revealed))) * revealed;
+    pos = mix(pos, edgeTarget, arrive);
+    vel *= 1.0 - revealed * 0.9;
   }
 
-  if (u_burst > 0.01 && ambient < 0.5) {
+  if (u_burst > 0.01 && ambient < 0.5 && photoHold < 0.2) {
     float len = max(0.02, length(rel));
     vel += (rel / len) * u_burst;
   }
 
-  if (u_impact > 0.01) {
+  if (u_impact > 0.01 && photoHold < 0.2) {
     vec2 delta = pos - u_impactPoint;
     float dist = length(delta);
     float radius = 0.34;
@@ -100,8 +100,8 @@ void main() {
   }
 
   float tiltLen = length(u_tilt);
-  vel += u_tilt * (0.055 + tiltLen * 0.04);
-  if (u_shake > 0.01) {
+  vel += u_tilt * (0.055 + tiltLen * 0.04) * (1.0 - photoHold);
+  if (u_shake > 0.01 && photoHold < 0.5) {
     vec2 jolt = vec2(
       sin(a_phase * 17.0 + u_time * 31.0),
       cos(a_phase * 13.0 - u_time * 27.0)
@@ -114,7 +114,7 @@ void main() {
   pos += vel * u_dt;
 
   along = dot(pos - u_origin, u_axis);
-  bool recycle = ambient < 0.5 && u_blooming > 0.5 && u_disperse < 0.42 && along < -0.04;
+  bool recycle = photoHold < 0.2 && ambient < 0.5 && u_blooming > 0.5 && u_disperse < 0.42 && along < -0.04;
   if (recycle) {
     float t = 0.1 + fract(a_phase * 1.73) * 0.55;
     float halfW = 0.055 + 0.28 * t * t;

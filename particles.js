@@ -125,8 +125,8 @@ export class ParticleField {
     const gl = this.gl;
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(
@@ -362,7 +362,8 @@ export class ParticleField {
     gl.activeTexture(gl.TEXTURE0);
     this.photoAmount = 0;
     this.photoTarget = 1;
-    this.glowPulse = Math.max(this.glowPulse, 0.55);
+    this.glowPulse = Math.max(this.glowPulse, 0.7);
+    this.sizePulse = Math.max(this.sizePulse, 0.35);
   }
 
   clearPhotoField() {
@@ -395,7 +396,7 @@ export class ParticleField {
     this.flowBoost *= Math.pow(0.97, frames);
     this.impactForce *= Math.pow(0.82, frames);
     this.shakeForce *= Math.pow(0.78, frames);
-    const photoRate = this.photoTarget > this.photoAmount ? 0.2 : 0.5;
+    const photoRate = this.photoTarget > this.photoAmount ? 0.85 : 0.55;
     const photoStep = photoRate * deltaSeconds;
     this.photoAmount += Math.max(-photoStep, Math.min(photoStep, this.photoTarget - this.photoAmount));
     this.blowEnergy = blowEnergy;
