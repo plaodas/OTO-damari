@@ -115,7 +115,7 @@ void main() {
   }
 
   float tiltLen = length(u_tilt);
-  vel += u_tilt * (0.055 + tiltLen * 0.04) * (1.0 - photoHold * 0.9);
+  vel += u_tilt * (0.011 + tiltLen * 0.008) * (1.0 - photoHold * 0.9);
   vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
     vec2 jolt = vec2(
