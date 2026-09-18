@@ -28,6 +28,7 @@ uniform float u_impact;
 uniform vec2 u_tilt;
 uniform float u_shake;
 uniform float u_blowLevel;
+uniform float u_north;
 
 out vec2 v_position;
 out vec2 v_velocity;
@@ -80,7 +81,7 @@ void main() {
       ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
       ambient > 0.5 ? 0.4 : 0.32,
       idle
-    );
+    ) * (1.0 - u_north * idle * 0.72);
     vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.015, idle);
     float freedom = 1.0 - photoHold * 0.88;
     vel += (wander - vel) * min(1.0, mix(1.8, 0.75, idle) * u_dt) * spread * freedom;
@@ -115,6 +116,7 @@ void main() {
 
   float tiltLen = length(u_tilt);
   vel += u_tilt * (0.055 + tiltLen * 0.04) * (1.0 - photoHold * 0.9);
+  vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
     vec2 jolt = vec2(
       sin(a_phase * 17.0 + u_time * 31.0),

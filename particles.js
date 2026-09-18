@@ -39,6 +39,7 @@ export class ParticleField {
     this.lastSwipeY = 0.5;
     this.tiltX = 0;
     this.tiltY = 0;
+    this.north = 0;
     this.shakeForce = 0;
     this.photoAmount = 0;
     this.photoTarget = 0;
@@ -66,6 +67,7 @@ export class ParticleField {
       "u_tilt",
       "u_shake",
       "u_blowLevel",
+      "u_north",
     ]);
     this.drawUniforms = getUniforms(gl, programs.particle, [
       "u_resolution",
@@ -348,9 +350,10 @@ export class ParticleField {
     }
   }
 
-  setTilt(x, y) {
+  setTilt(x, y, north = 0) {
     this.tiltX = x;
     this.tiltY = y;
+    this.north = north;
   }
 
   setPhotoField({ width, height, pixels }) {
@@ -510,6 +513,7 @@ export class ParticleField {
     gl.uniform2f(this.updateUniforms.u_tilt, this.tiltX, this.tiltY);
     gl.uniform1f(this.updateUniforms.u_shake, this.shakeForce);
     gl.uniform1f(this.updateUniforms.u_blowLevel, this.blowLevel || 0);
+    gl.uniform1f(this.updateUniforms.u_north, this.north || 0);
 
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.transformFeedback);
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.stateBuffers[write]);

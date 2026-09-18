@@ -191,6 +191,8 @@ class MotionInput {
     this.restReady = false;
     this.hasOrientation = false;
     this.gotRelativeOrientation = false;
+    this.heading = null;
+    this.north = 0;
     this.onShake = null;
     this.android = /Android/i.test(navigator.userAgent);
   }
@@ -245,6 +247,24 @@ class MotionInput {
     return { x, y };
   }
 
+  readHeading(event) {
+    const screen = this.screenAngle();
+    if (Number.isFinite(event.webkitCompassHeading)) {
+      return (event.webkitCompassHeading + screen + 360) % 360;
+    }
+    const absolute = event.absolute === true || event.type === "deviceorientationabsolute";
+    if (absolute && Number.isFinite(event.alpha)) {
+      return (360 - event.alpha + screen + 360) % 360;
+    }
+    return null;
+  }
+
+  northAlignment(heading) {
+    const delta = Math.min(Math.abs(heading), 360 - Math.abs(heading));
+    if (delta >= 22) return 0;
+    return 0.5 * (1 + Math.cos((Math.PI * delta) / 22));
+  }
+
   setRawTilt(x, y) {
     const clamp = (value) => Math.max(-1, Math.min(1, value));
     this.gravityX += (clamp(x) - this.gravityX) * 0.22;
@@ -287,6 +307,8 @@ class MotionInput {
   };
 
   handleOrientation = (event) => {
+    const heading = this.readHeading(event);
+    if (heading != null) this.heading = heading;
     if (event.type === "deviceorientationabsolute" && this.gotRelativeOrientation) return;
     if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
     if (event.type === "deviceorientation") this.gotRelativeOrientation = true;
@@ -296,6 +318,9 @@ class MotionInput {
   };
 
   update() {
+    const northTarget = this.heading == null ? 0 : this.northAlignment(this.heading);
+    this.north += (northTarget - this.north) * 0.12;
+
     if (!this.started || !this.restReady) {
       this.tiltX += (0 - this.tiltX) * 0.28;
       this.tiltY += (0 - this.tiltY) * 0.28;
@@ -973,7 +998,7 @@ async function start() {
 
     mic.update();
     motion.update();
-    particles.setTilt(motion.tiltX, motion.tiltY);
+    particles.setTilt(motion.tiltX, motion.tiltY, motion.north);
     if (mic.level !== lastLevel) {
       if (mic.level === 3) synth.startShimmer();
       else synth.stopShimmer();
