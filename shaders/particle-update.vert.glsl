@@ -33,6 +33,19 @@ uniform float u_north;
 out vec2 v_position;
 out vec2 v_velocity;
 
+vec2 shakeVortex(vec2 pos, vec2 center, float sense, float strength) {
+  vec2 d = pos - center;
+  d.y *= 1.7;
+  float dist = length(d);
+  float mask = exp(-dot(d, d) / 0.03);
+  vec2 tangent = vec2(-d.y, d.x) / max(dist, 0.0008);
+  vec2 radial = d / max(dist, 0.0008);
+  float diamond = 0.62 + 0.38 * abs(d.x) / max(dist, 0.0008);
+  vec2 force = tangent * sense * strength * mask * diamond;
+  force -= radial * (dist - 0.1) * strength * mask * 0.5;
+  return force;
+}
+
 void main() {
   vec2 pos = a_position;
   vec2 vel = a_velocity;
@@ -85,11 +98,11 @@ void main() {
       ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
       ambient > 0.5 ? 0.22 : 0.16,
       idle
-    ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88);
+    ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88) * (1.0 - u_shake * 0.78);
     vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.01, idle);
     wander += vec2(swellA, swellB) * idle * 0.018;
     float freedom = 1.0 - photoHold * 0.88;
-    vel += (wander - vel) * min(1.0, mix(1.8, 0.9, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8);
+    vel += (wander - vel) * min(1.0, mix(1.8, 0.9, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8) * (1.0 - u_shake * 0.7);
     vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
@@ -122,11 +135,10 @@ void main() {
   vel += u_tilt * (0.011 + tiltLen * 0.008) * (1.0 - photoHold * 0.9);
   vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
-    vec2 jolt = vec2(
-      sin(a_phase * 17.0 + u_time * 31.0),
-      cos(a_phase * 13.0 - u_time * 27.0)
-    );
-    vel += jolt * u_shake * 0.28;
+    float curl = u_shake * 0.24;
+    vel += shakeVortex(pos, vec2(0.5, 0.26), 1.0, curl);
+    vel += shakeVortex(pos, vec2(0.5, 0.5), -1.0, curl);
+    vel += shakeVortex(pos, vec2(0.5, 0.74), 1.0, curl);
   }
 
   float damping = mix(mix(0.965, 0.96, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));

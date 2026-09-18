@@ -39,6 +39,13 @@ export class VelocityField {
         "u_flow",
         "u_dt",
       ]),
+      vortex: getUniforms(gl, programs.vortex, [
+        "u_velocity",
+        "u_center",
+        "u_strength",
+        "u_radius",
+        "u_aspect",
+      ]),
     };
   }
 
@@ -126,6 +133,22 @@ export class VelocityField {
       gl.uniform2f(this.uniforms.splat.u_force, fx, -fy);
       gl.uniform1f(this.uniforms.splat.u_radius, Math.max(0.0002, radius));
       gl.uniform1f(this.uniforms.splat.u_aspect, this.aspect);
+    });
+    this.read = write;
+  }
+
+  addVortex(x, y, strength, radius) {
+    if (!this.enabled) return;
+    const write = 1 - this.read;
+    this.blit(this.programs.vortex, this.velocity[write], () => {
+      const gl = this.gl;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.velocity[this.read].texture);
+      gl.uniform1i(this.uniforms.vortex.u_velocity, 0);
+      gl.uniform2f(this.uniforms.vortex.u_center, x, 1 - y);
+      gl.uniform1f(this.uniforms.vortex.u_strength, -strength);
+      gl.uniform1f(this.uniforms.vortex.u_radius, Math.max(0.0002, radius));
+      gl.uniform1f(this.uniforms.vortex.u_aspect, this.aspect);
     });
     this.read = write;
   }

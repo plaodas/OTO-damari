@@ -13,6 +13,7 @@ import divergenceFragSource from "./shaders/fluid/divergence.frag.glsl?raw";
 import jacobiFragSource from "./shaders/fluid/jacobi.frag.glsl?raw";
 import subtractFragSource from "./shaders/fluid/subtract.frag.glsl?raw";
 import funnelFragSource from "./shaders/fluid/funnel.frag.glsl?raw";
+import vortexFragSource from "./shaders/fluid/vortex.frag.glsl?raw";
 import { createNoiseTexture, createProgram } from "./gl.js";
 import { adaptQuality, detectQuality } from "./quality.js";
 import { VelocityField } from "./fluid.js";
@@ -951,6 +952,7 @@ async function start() {
     jacobi: createProgram(gl, quadVertSource, jacobiFragSource),
     subtract: createProgram(gl, quadVertSource, subtractFragSource),
     funnel: createProgram(gl, quadVertSource, funnelFragSource),
+    vortex: createProgram(gl, quadVertSource, vortexFragSource),
   };
   const noiseTexture = createNoiseTexture(gl);
   const quality = detectQuality();

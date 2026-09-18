@@ -393,15 +393,14 @@ export class ParticleField {
     this.shakeForce = Math.max(this.shakeForce, force);
     this.glowPulse = Math.max(this.glowPulse, 0.45 + force * 0.35);
     this.flowBoost = Math.max(this.flowBoost, 0.55 + force * 0.4);
-    this.trailFade = Math.max(this.trailFade, 0.18 + force * 0.22);
+    this.trailFade = Math.max(this.trailFade, 0.28 + force * 0.32);
     if (!this.field?.enabled) return;
-    const count = 4 + Math.floor(force * 3);
-    for (let i = 0; i < count; i += 1) {
-      const x = 0.12 + Math.random() * 0.76;
-      const y = 0.12 + Math.random() * 0.76;
-      const angle = Math.random() * Math.PI * 2;
-      const mag = 0.06 + force * 0.1;
-      this.field.splat(x, y, Math.cos(angle) * mag, Math.sin(angle) * mag, 0.016 + force * 0.01);
+    const mag = 0.1 + force * 0.16;
+    const radius = 0.03 + force * 0.012;
+    const centers = [0.26, 0.5, 0.74];
+    for (let i = 0; i < centers.length; i += 1) {
+      const sense = i % 2 === 0 ? 1 : -1;
+      this.field.addVortex(0.5, centers[i], sense * mag, radius);
     }
   }
 
@@ -416,7 +415,7 @@ export class ParticleField {
     this.waterSheen *= Math.pow(0.96, frames);
     this.flowBoost *= Math.pow(0.97, frames);
     this.impactForce *= Math.pow(0.82, frames);
-    this.shakeForce *= Math.pow(0.78, frames);
+    this.shakeForce *= Math.pow(0.88, frames);
     const photoRate = this.photoTarget > this.photoAmount ? 0.18 : 0.42;
     const photoStep = photoRate * deltaSeconds;
     this.photoAmount += Math.max(-photoStep, Math.min(photoStep, this.photoTarget - this.photoAmount));
