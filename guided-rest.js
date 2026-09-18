@@ -19,6 +19,7 @@ export class GuidedRestSession {
     this.active = false;
     this.paused = false;
     this.breathing = false;
+    this.contractStarted = false;
   }
 
   start() {
@@ -27,6 +28,7 @@ export class GuidedRestSession {
     this.active = true;
     this.paused = false;
     this.breathing = false;
+    this.contractStarted = false;
   }
 
   stop() {
@@ -34,6 +36,7 @@ export class GuidedRestSession {
     this.paused = false;
     this.phase = "idle";
     this.breathing = false;
+    this.contractStarted = false;
   }
 
   setPaused(paused) {
@@ -41,7 +44,11 @@ export class GuidedRestSession {
   }
 
   update(deltaSeconds) {
-    if (!this.active || this.paused) return false;
+    if (!this.active || this.paused) {
+      this.contractStarted = false;
+      return false;
+    }
+    const wasExpanding = this.cycleTime < EXPAND_SECONDS;
     this.elapsed = Math.min(this.duration, this.elapsed + Math.max(0, deltaSeconds));
 
     if (this.elapsed < SETTLE_SECONDS) {
@@ -53,9 +60,18 @@ export class GuidedRestSession {
     } else {
       this.phase = "complete";
       this.active = false;
+      this.contractStarted = false;
       return true;
     }
+
+    const expanding = this.cycleTime < EXPAND_SECONDS;
+    this.contractStarted = wasExpanding && !expanding && this.phase === "breathe";
     return false;
+  }
+
+  get remainingContract() {
+    if (this.cycleTime < EXPAND_SECONDS) return 0;
+    return Math.max(0, CYCLE_SECONDS - this.cycleTime);
   }
 
   get cycleIndex() {

@@ -773,36 +773,64 @@ class HybridSynth {
     return true;
   }
 
-  startGuidedTone() {
+  makeBreathEnvelope(peak, duration) {
+    const count = Math.max(48, Math.min(160, Math.round(duration * 24)));
+    const values = new Float32Array(count);
+    for (let i = 0; i < count; i += 1) {
+      const t = i / (count - 1);
+      let amount;
+      if (t < 0.32) amount = 0.5 - 0.5 * Math.cos(Math.PI * (t / 0.32));
+      else if (t < 0.52) amount = 1;
+      else amount = 0.5 + 0.5 * Math.cos(Math.PI * ((t - 0.52) / 0.48));
+      values[i] = Math.max(0.0001, peak * amount);
+    }
+    return values;
+  }
+
+  startGuidedTone(durationSeconds = 6) {
     const context = this.unlock();
-    if (!context || !this.compressor || this.guidedTone) return false;
+    if (!context || !this.compressor) return false;
+    if (this.guidedTone) this.stopGuidedTone(0.2);
 
     const frequency = SOLFEGGIO_FREQUENCIES[this.resonanceIndex];
     this.resonanceIndex = (this.resonanceIndex + 1) % SOLFEGGIO_FREQUENCIES.length;
+    const duration = Math.max(0.9, Math.min(8, Number(durationSeconds) || 6));
     const startAt = context.currentTime;
+    const peak = frequency <= 285 ? 0.022 : 0.016;
     const mix = context.createGain();
     const oscillator = context.createOscillator();
-    mix.gain.setValueAtTime(0.0001, startAt);
-    mix.gain.exponentialRampToValueAtTime(frequency <= 285 ? 0.022 : 0.016, startAt + 0.22);
+    mix.gain.setValueCurveAtTime(this.makeBreathEnvelope(peak, duration), startAt, duration);
     mix.connect(this.compressor);
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(frequency, startAt);
     oscillator.connect(mix);
     oscillator.start(startAt);
-    this.guidedTone = { mix, oscillator };
+    oscillator.stop(startAt + duration + 0.04);
+    const voice = { mix, oscillator };
+    this.guidedTone = voice;
+    oscillator.addEventListener("ended", () => {
+      try {
+        oscillator.disconnect();
+        mix.disconnect();
+      } catch {
+        // already disconnected
+      }
+      if (this.guidedTone === voice) this.guidedTone = null;
+    });
     return true;
   }
 
-  stopGuidedTone() {
+  stopGuidedTone(release = 0.9) {
     if (!this.guidedTone || !this.context) return;
 
     const { mix, oscillator } = this.guidedTone;
     const now = this.context.currentTime;
+    const fade = Math.max(0.18, release);
     mix.gain.cancelScheduledValues(now);
     mix.gain.setValueAtTime(Math.max(0.0001, mix.gain.value), now);
-    mix.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+    mix.gain.exponentialRampToValueAtTime(0.0001, now + fade);
     try {
-      oscillator.stop(now + 0.38);
+      oscillator.stop(now + fade + 0.04);
     } catch {
       // already stopped
     }
@@ -814,7 +842,7 @@ class HybridSynth {
       } catch {
         // already disconnected
       }
-    }, 420);
+    }, (fade + 0.08) * 1000);
   }
 
   startBlowChord() {
@@ -1553,8 +1581,11 @@ async function start() {
         );
         const breath = guidedRest.updateBreath(mic.energy, mic.level);
         particles.setBreathGlow(breath.holding);
-        if (breath.started) {
-          if (synth.startGuidedTone()) particles.pulseResonance();
+        const contractTone =
+          breath.started || (breath.holding && guidedRest.contractStarted);
+        if (contractTone) {
+          const started = synth.startGuidedTone(guidedRest.remainingContract);
+          if (started && breath.started) particles.pulseResonance();
         } else if (breath.stopped) {
           synth.stopGuidedTone();
         }
