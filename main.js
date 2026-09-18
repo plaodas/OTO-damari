@@ -481,8 +481,8 @@ class MotionInput {
 
   northAlignment(heading) {
     const delta = Math.min(Math.abs(heading), 360 - Math.abs(heading));
-    if (delta >= 32) return 0;
-    return 0.5 * (1 + Math.cos((Math.PI * delta) / 32));
+    if (delta >= 48) return 0;
+    return 0.5 * (1 + Math.cos((Math.PI * delta) / 48));
   }
 
   setRawTilt(x, y) {

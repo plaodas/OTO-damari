@@ -102,7 +102,7 @@ export class ParticleField {
       : null;
     this.dummyVelocity = this.createDummyVelocity();
     this.photoTexture = this.createPhotoTexture();
-    this.trailUniforms = getUniforms(gl, programs.trail, ["u_resolution", "u_trailFade"]);
+    this.trailUniforms = getUniforms(gl, programs.trail, ["u_resolution", "u_trailFade", "u_north"]);
     this.impactX = 0.5;
     this.impactY = 0.5;
     this.impactForce = 0;
@@ -580,6 +580,7 @@ export class ParticleField {
       gl.useProgram(this.programs.trail);
       gl.uniform2f(this.trailUniforms.u_resolution, this.width, this.height);
       gl.uniform1f(this.trailUniforms.u_trailFade, this.trailFade);
+      gl.uniform1f(this.trailUniforms.u_north, this.north || 0);
       gl.drawArraysInstanced(gl.LINES, 0, 2, this.trailCount);
     }
 
