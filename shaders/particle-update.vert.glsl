@@ -1,0 +1,105 @@
+#version 300 es
+precision highp float;
+
+in vec2 a_position;
+in vec2 a_velocity;
+in float a_lane;
+in float a_phase;
+in vec2 a_home;
+
+uniform sampler2D u_velocity;
+uniform float u_hasField;
+uniform float u_dt;
+uniform float u_time;
+uniform float u_gather;
+uniform float u_disperse;
+uniform float u_blooming;
+uniform float u_flowSpeed;
+uniform float u_burst;
+uniform vec2 u_origin;
+uniform vec2 u_axis;
+uniform vec2 u_perp;
+uniform float u_bloomLength;
+uniform float u_swipeHeld;
+uniform vec2 u_impactPoint;
+uniform float u_impact;
+
+out vec2 v_position;
+out vec2 v_velocity;
+
+void main() {
+  vec2 pos = a_position;
+  vec2 vel = a_velocity;
+  float spread = u_blooming > 0.5 ? u_disperse : 1.0;
+  vec2 rel = pos - u_origin;
+  float along = dot(rel, u_axis);
+  float across = dot(rel, u_perp);
+  float bloom = max(u_bloomLength, 0.08);
+  float rise = clamp(along / bloom, 0.0, 1.2);
+
+  if (u_hasField > 0.5) {
+    vec2 field = texture(u_velocity, clamp(vec2(pos.x, 1.0 - pos.y), 0.002, 0.998)).xy;
+    field.y = -field.y;
+    vel = mix(vel, field, min(1.0, 10.0 * u_dt));
+    vel += field * 0.45;
+  }
+
+  if (u_gather > 0.02 && u_hasField < 0.5) {
+    float theta = atan(across, max(0.012, along));
+    float petal = 0.86 + 0.14 * pow(abs(cos(theta * 2.5)), 1.1);
+    float tube = 0.14;
+    float u = max(0.0, (rise - tube) / (1.0 - tube));
+    float flare = pow(u, 2.7);
+    float amp = 0.5 * petal;
+    float targetAcross = a_lane * (0.055 + amp * flare);
+    vec2 target = u_origin + u_axis * along + u_perp * targetAcross;
+    vec2 tangent = normalize(u_axis * bloom + u_perp * a_lane * amp * 2.7 * pow(max(u, 0.0), 1.7) + vec2(0.0001));
+    float speed = u_flowSpeed * (0.92 + rise * 0.4);
+    vel += (tangent * speed - vel) * min(1.0, 3.4 * u_dt) * u_gather;
+    float pull = 7.0 * u_gather * min(1.0, 0.18 + rise * 2.2);
+    vel += (target - pos) * pull * u_dt;
+    if (along < bloom * 0.22) vel += u_axis * u_flowSpeed * 1.6 * u_gather * u_dt;
+  }
+
+  if (spread > 0.02) {
+    float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
+    float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
+    float homePull = u_blooming > 0.5 ? 1.15 * u_disperse : 0.22;
+    vel += vec2(waveA, waveB) * 0.08 * spread;
+    vel += (a_home - pos) * homePull * u_dt;
+  }
+
+  if (u_burst > 0.01) {
+    float len = max(0.02, length(rel));
+    vel += (rel / len) * u_burst;
+  }
+
+  if (u_impact > 0.01) {
+    vec2 delta = pos - u_impactPoint;
+    float dist = length(delta);
+    float radius = 0.34;
+    if (dist < radius) {
+      vel += normalize(delta + vec2(0.0001)) * (1.0 - dist / radius) * u_impact * 0.45;
+    }
+  }
+
+  float damping = mix(0.965, 0.972, step(0.55, u_gather));
+  vel *= pow(damping, u_dt * 60.0);
+  pos += vel * u_dt;
+
+  along = dot(pos - u_origin, u_axis);
+  bool recycle = u_blooming > 0.5 && u_disperse < 0.42;
+  bool off = pos.x < 0.0 || pos.x > 1.0 || pos.y < 0.0 || pos.y > 1.0;
+  if (recycle && (along < -0.04 || ((off || along > bloom * 1.12) && u_swipeHeld < 0.5))) {
+    float t = 0.1 + fract(a_phase * 1.73) * 0.55;
+    float halfW = 0.055 + 0.28 * t * t;
+    pos = u_origin + u_axis * (t * bloom) + u_perp * a_lane * halfW * 0.5;
+    vel = u_axis * u_flowSpeed * 0.85 + u_perp * a_lane * 0.04;
+  } else {
+    pos = fract(pos + vec2(1.0));
+  }
+
+  v_position = pos;
+  v_velocity = vel;
+  gl_Position = vec4(-2.0, -2.0, 0.0, 1.0);
+}

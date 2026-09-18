@@ -1,6 +1,6 @@
 # OTO溜まり
 
-吹くと青いノイズ粒が流れ、夜光虫のような光と音が呼応する WebGL1 / WebAudio MVP です。
+吹くと青いノイズ粒が流れ、夜光虫のような光と音が呼応する WebGL2 / WebAudio MVP です。WebGL2 必須です。half-float の速度場が使えない端末では、粒子は従来の漏斗式で動きます。
 
 ## 起動
 
@@ -23,6 +23,13 @@ npm run dev
 - 弱・中の音は吹き始めた瞬間だけ鳴ります
 - 強は吹き続けているあいだ約16ms間隔で粒が連続します
 - マイクを拒否すると吹きかけ検出だけが無効になり、粒子表示とタップ操作は継続します
+
+## 描画と品質
+
+- 粒子は Transform Feedback で GPU 更新します。スマホは約 8,000〜16,000、PC は約 32,000 粒です
+- 速度場は短辺 128、上限 256 の RGBA16F（`EXT_color_buffer_float`）です。Jacobi はスマホ 8 回、PC 16 回程度です
+- `devicePixelRatio` とフレーム時間を見て格子と Jacobi 回数を落とします
+- `gl_PointSize` 上限が小さい端末だけ、point sprite の代わりに instanced quad で描きます
 
 ## スマホで確認する場合
 
@@ -63,6 +70,10 @@ npm run preview
 .
 ├── index.html
 ├── main.js
+├── fluid.js
+├── particles.js
+├── gl.js
+├── quality.js
 ├── public
 │   ├── apple-touch-icon.png
 │   ├── icons
@@ -71,8 +82,10 @@ npm run preview
 └── shaders
     ├── particle.vert.glsl
     ├── particle.frag.glsl
+    ├── particle-update.vert.glsl
     ├── trail.vert.glsl
-    └── trail.frag.glsl
+    ├── trail.frag.glsl
+    └── fluid
 ```
 
-粒子は CPU 側で360個を更新し、動的 VBO に転送しています。描画は WebGL1 の point sprite と生成ノイズテクスチャを使用し、`gl.ONE, gl.ONE` の加算合成で発光させています。強吹き時だけ速度方向へ短い光跡を `gl.LINES` で重ねます。音源は AudioWorklet を使わず、Karplus–Strong、少量の FM、ループノイズのグレインを標準ノードで組み立てています。
+粒子の位置と速度は GPU バッファで ping-pong します。描画は WebGL2 の point sprite（または instanced quad）と生成ノイズテクスチャを使用し、`gl.ONE, gl.ONE` の加算合成で発光させています。強吹き時だけ 1 フレーム遅れの位置で短い光跡を `gl.LINES` で重ねます。マイク RMS とスワイプは速度場への splat、漏斗は場への外力です。音源は AudioWorklet を使わず、Karplus–Strong、少量の FM、ループノイズのグレインを標準ノードで組み立てています。

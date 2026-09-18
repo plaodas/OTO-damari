@@ -1,13 +1,24 @@
 import particleVertSource from "./shaders/particle.vert.glsl?raw";
 import particleFragSource from "./shaders/particle.frag.glsl?raw";
+import particleQuadVertSource from "./shaders/particle-quad.vert.glsl?raw";
+import particleQuadFragSource from "./shaders/particle-quad.frag.glsl?raw";
 import trailVertSource from "./shaders/trail.vert.glsl?raw";
 import trailFragSource from "./shaders/trail.frag.glsl?raw";
+import particleUpdateVertSource from "./shaders/particle-update.vert.glsl?raw";
+import emptyFragSource from "./shaders/empty.frag.glsl?raw";
+import quadVertSource from "./shaders/quad.vert.glsl?raw";
+import splatFragSource from "./shaders/fluid/splat.frag.glsl?raw";
+import advectFragSource from "./shaders/fluid/advect.frag.glsl?raw";
+import divergenceFragSource from "./shaders/fluid/divergence.frag.glsl?raw";
+import jacobiFragSource from "./shaders/fluid/jacobi.frag.glsl?raw";
+import subtractFragSource from "./shaders/fluid/subtract.frag.glsl?raw";
+import funnelFragSource from "./shaders/fluid/funnel.frag.glsl?raw";
+import { createNoiseTexture, createProgram } from "./gl.js";
+import { adaptQuality, detectQuality } from "./quality.js";
+import { VelocityField } from "./fluid.js";
+import { ParticleField } from "./particles.js";
 
-const PARTICLE_COUNT = 360;
-const FLOATS_PER_PARTICLE = 4;
-const FLOATS_PER_TRAIL_VERTEX = 3;
 const GRAIN_VOICES = 3;
-const TAU = Math.PI * 2;
 
 const LEVEL_ENTER = [0, 0.012, 0.032, 0.07];
 const LEVEL_EXIT = [0, 0.008, 0.024, 0.05];
@@ -396,544 +407,52 @@ class HybridSynth {
   }
 }
 
-class ParticleField {
-  constructor(gl, particleProgram, trailProgram) {
-    this.gl = gl;
-    this.particleProgram = particleProgram;
-    this.trailProgram = trailProgram;
-    this.width = 1;
-    this.height = 1;
-    this.pixelRatio = 1;
-    this.particles = [];
-    this.vertexData = new Float32Array(PARTICLE_COUNT * FLOATS_PER_PARTICLE);
-    this.trailData = new Float32Array(PARTICLE_COUNT * 4 * FLOATS_PER_TRAIL_VERTEX);
-    this.buffer = gl.createBuffer();
-    this.trailBuffer = gl.createBuffer();
-    this.glowPulse = 0;
-    this.sizePulse = 0;
-    this.waterSheen = 0;
-    this.flowBoost = 0;
-    this.flowSpeed = 8;
-    this.trailFade = 0;
-    this.bloomAge = 0;
-    this.disperse = 0;
-    this.didBurst = false;
-    this.swipeActive = false;
-    this.swipeHeld = false;
-    this.originX = 0.5;
-    this.originY = 0.9;
-    this.axisX = 0;
-    this.axisY = -1;
-    this.perpX = 1;
-    this.perpY = 0;
-    this.bloomLength = 1;
-
-    this.particleLocations = {
-      position: gl.getAttribLocation(particleProgram, "a_position"),
-      size: gl.getAttribLocation(particleProgram, "a_size"),
-      brightness: gl.getAttribLocation(particleProgram, "a_brightness"),
-      resolution: gl.getUniformLocation(particleProgram, "u_resolution"),
-      pixelRatio: gl.getUniformLocation(particleProgram, "u_pixelRatio"),
-      waterSheen: gl.getUniformLocation(particleProgram, "u_waterSheen"),
-      noise: gl.getUniformLocation(particleProgram, "u_noise"),
-    };
-
-    this.trailLocations = {
-      position: gl.getAttribLocation(trailProgram, "a_position"),
-      brightness: gl.getAttribLocation(trailProgram, "a_brightness"),
-      resolution: gl.getUniformLocation(trailProgram, "u_resolution"),
-    };
-
-    for (let i = 0; i < PARTICLE_COUNT; i += 1) {
-      this.particles.push({
-        x: Math.random(),
-        y: Math.random(),
-        vx: (Math.random() - 0.5) * 7,
-        vy: (Math.random() - 0.5) * 7,
-        px: 0,
-        py: 0,
-        qx: 0,
-        qy: 0,
-        phase: Math.random() * TAU,
-        lane: Math.random() * 2 - 1,
-        homeX: Math.random(),
-        homeY: Math.random(),
-        size: 3 + Math.random() * 9,
-        brightness: 0.35 + Math.random() * 0.65,
-      });
-    }
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.vertexData.byteLength, gl.DYNAMIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.trailData.byteLength, gl.DYNAMIC_DRAW);
-  }
-
-  resize(width, height, pixelRatio) {
-    const oldWidth = this.width;
-    const oldHeight = this.height;
-    this.width = width;
-    this.height = height;
-    this.pixelRatio = pixelRatio;
-
-    for (const particle of this.particles) {
-      particle.x = oldWidth === 1 ? particle.x * width : (particle.x / oldWidth) * width;
-      particle.y = oldHeight === 1 ? particle.y * height : (particle.y / oldHeight) * height;
-      particle.homeX =
-        oldWidth === 1 ? particle.homeX * width : (particle.homeX / oldWidth) * width;
-      particle.homeY =
-        oldHeight === 1 ? particle.homeY * height : (particle.homeY / oldHeight) * height;
-      particle.px = particle.x;
-      particle.py = particle.y;
-      particle.qx = particle.x;
-      particle.qy = particle.y;
-    }
-  }
-
-  pulse(kind) {
-    if (kind === "weak") {
-      this.glowPulse = 1;
-      this.sizePulse = 0.85;
-    } else if (kind === "medium") {
-      this.glowPulse = 0.72;
-      this.waterSheen = 1;
-      this.flowBoost = 1;
-    } else if (kind === "strong") {
-      this.glowPulse = 1;
-      this.flowBoost = 1.35;
-      this.trailFade = 1;
-      this.bloomAge = 0;
-      this.disperse = 0;
-      this.didBurst = false;
-    }
-  }
-
-  setAxis(dx, dy) {
-    const length = Math.hypot(dx, dy);
-    if (length < 1) {
-      this.axisX = 0;
-      this.axisY = -1;
-    } else {
-      this.axisX = dx / length;
-      this.axisY = dy / length;
-    }
-    this.perpX = -this.axisY;
-    this.perpY = this.axisX;
-  }
-
-  setBlowOrigin() {
-    if (this.swipeHeld) return;
-    this.originX = this.width * 0.5;
-    this.originY = this.height * 0.9;
-    this.setAxis(0, -1);
-    this.bloomLength = Math.max(80, this.height * 0.88);
-  }
-
-  beginSwipe(x, y, toX, toY) {
-    this.swipeActive = true;
-    this.swipeHeld = true;
-    this.originX = x;
-    this.originY = y;
-    this.setAxis(toX - x, toY - y);
-    this.bloomLength = Math.max(this.height * 0.42, Math.hypot(toX - x, toY - y));
-    this.pulse("strong");
-  }
-
-  steerSwipe(x, y) {
-    const dx = x - this.originX;
-    const dy = y - this.originY;
-    this.setAxis(dx, dy);
-    this.bloomLength = Math.max(this.height * 0.42, Math.hypot(dx, dy));
-  }
-
-  releaseSwipe() {
-    this.swipeHeld = false;
-  }
-
-  spawnAlongStem(particle) {
-    const t = 0.1 + Math.random() * 0.55;
-    const along = t * this.bloomLength;
-    const u = Math.max(0, (t - 0.14) / 0.86);
-    const half = Math.min(this.width, this.height) * (0.055 + 0.28 * u * u);
-    const across = particle.lane * half * (0.35 + Math.random() * 0.65);
-    particle.x = this.originX + this.axisX * along + this.perpX * across;
-    particle.y = this.originY + this.axisY * along + this.perpY * across;
-    particle.vx = this.axisX * this.flowSpeed * 0.85 + this.perpX * particle.lane * 18;
-    particle.vy = this.axisY * this.flowSpeed * 0.85 + this.perpY * particle.lane * 18;
-  }
-
-  wrapScreen(particle, margin) {
-    let wrapped = false;
-    if (particle.x < -margin) {
-      particle.x = this.width + margin;
-      wrapped = true;
-    } else if (particle.x > this.width + margin) {
-      particle.x = -margin;
-      wrapped = true;
-    }
-    if (particle.y < -margin) {
-      particle.y = this.height + margin;
-      wrapped = true;
-    } else if (particle.y > this.height + margin) {
-      particle.y = -margin;
-      wrapped = true;
-    }
-    return wrapped;
-  }
-
-  impact(x, y) {
-    for (const particle of this.particles) {
-      const dx = particle.x - x;
-      const dy = particle.y - y;
-      const distance = Math.hypot(dx, dy);
-      const radius = Math.min(this.width, this.height) * 0.34;
-      if (distance > radius) continue;
-
-      const force = (1 - distance / radius) * 240;
-      const inverseDistance = 1 / Math.max(distance, 4);
-      particle.vx += dx * inverseDistance * force;
-      particle.vy += dy * inverseDistance * force;
-    }
-  }
-
-  update(deltaSeconds, elapsedSeconds, blowEnergy, blowLevel) {
-    const frames = deltaSeconds * 60;
-    this.glowPulse *= Math.pow(0.92, frames);
-    this.sizePulse *= Math.pow(0.94, frames);
-    this.waterSheen *= Math.pow(0.96, frames);
-    this.flowBoost *= Math.pow(0.97, frames);
-
-    const flowLevel = blowLevel === 3 || this.swipeActive ? 3 : blowLevel;
-    const flowTarget = [8, 11, 52, 132][flowLevel] + this.flowBoost * 36;
-    this.flowSpeed += (flowTarget - this.flowSpeed) * Math.min(1, 0.08 * frames);
-
-    const blooming = blowLevel === 3 || this.swipeActive;
-    this.trailFade = blooming
-      ? Math.min(1, this.trailFade + deltaSeconds * 4)
-      : this.trailFade * Math.pow(0.9, frames);
-
-    if (blowLevel === 3) this.setBlowOrigin();
-
-    if (blooming) {
-      this.bloomAge += deltaSeconds;
-      if (this.swipeHeld) {
-        this.bloomAge = Math.min(this.bloomAge, 0.5);
-        this.disperse = 0;
-        this.didBurst = false;
-      } else {
-        const disperseTarget = this.bloomAge < 0.7 ? 0 : Math.min(1, (this.bloomAge - 0.7) / 0.8);
-        this.disperse += (disperseTarget - this.disperse) * Math.min(1, 0.14 * frames);
-      }
-    } else {
-      this.bloomAge = 0;
-      this.disperse *= Math.pow(0.92, frames);
-    }
-
-    const gather = blooming ? 1 - this.disperse : 0;
-    const originX = this.originX;
-    const originY = this.originY;
-    const axisX = this.axisX;
-    const axisY = this.axisY;
-    const perpX = this.perpX;
-    const perpY = this.perpY;
-    const bloomLength = Math.max(80, this.bloomLength);
-    const damping = Math.pow(blooming && gather > 0.55 ? 0.972 : 0.965, frames);
-
-    if (blooming && this.disperse > 0.2 && !this.didBurst) {
-      this.didBurst = true;
-      for (const particle of this.particles) {
-        const dx = particle.x - originX;
-        const dy = particle.y - originY;
-        const len = Math.max(18, Math.hypot(dx, dy));
-        particle.vx += (dx / len) * 220 + (Math.random() - 0.5) * 90;
-        particle.vy += (dy / len) * 160 + (Math.random() - 0.5) * 70;
-      }
-    }
-
-    for (let i = 0; i < this.particles.length; i += 1) {
-      const particle = this.particles[i];
-      const waveA = Math.sin(elapsedSeconds * 0.72 + particle.phase + particle.y * 0.008);
-      const waveB = Math.cos(elapsedSeconds * 0.51 - particle.phase * 1.7 + particle.x * 0.006);
-
-      if (gather > 0.02) {
-        const relX = particle.x - originX;
-        const relY = particle.y - originY;
-        const along = relX * axisX + relY * axisY;
-        const across = relX * perpX + relY * perpY;
-        const rise = Math.max(0, Math.min(1.2, along / bloomLength));
-        const theta = Math.atan2(across, Math.max(12, along));
-        const petal = 0.86 + 0.14 * Math.pow(Math.abs(Math.cos(theta * 2.5)), 1.1);
-        const tube = 0.14;
-        const u = Math.max(0, (rise - tube) / (1 - tube));
-        const exponent = 2.7;
-        const flare = Math.pow(u, exponent);
-        const flareDeriv = u <= 0 ? 0 : (exponent * Math.pow(u, exponent - 1)) / (1 - tube);
-        const amp = Math.min(this.width, this.height) * 0.5 * petal;
-        const tubeWidth = Math.min(this.width, this.height) * 0.055;
-        const targetAcross = particle.lane * (tubeWidth + amp * flare);
-        const targetX = originX + axisX * along + perpX * targetAcross;
-        const targetY = originY + axisY * along + perpY * targetAcross;
-        const dalong = bloomLength;
-        const dacross = particle.lane * amp * flareDeriv;
-        const txx = axisX * dalong + perpX * dacross;
-        const tyy = axisY * dalong + perpY * dacross;
-        const tanLen = Math.hypot(txx, tyy) || 1;
-        const speed = this.flowSpeed * (0.92 + rise * 0.4);
-        const tx = (txx / tanLen) * speed;
-        const ty = (tyy / tanLen) * speed;
-        const steer = Math.min(1, 3.4 * deltaSeconds) * gather;
-        particle.vx += (tx - particle.vx) * steer;
-        particle.vy += (ty - particle.vy) * steer;
-        const pull = 7 * gather * Math.min(1, 0.18 + rise * 2.2);
-        particle.vx += (targetX - particle.x) * pull * deltaSeconds;
-        particle.vy += (targetY - particle.y) * pull * deltaSeconds;
-        particle.vx += waveA * 4 * gather * deltaSeconds;
-        particle.vy += waveB * 3 * gather * deltaSeconds;
-        if (along < bloomLength * 0.22) {
-          particle.vx += axisX * this.flowSpeed * 1.6 * gather * deltaSeconds;
-          particle.vy += axisY * this.flowSpeed * 1.6 * gather * deltaSeconds;
-        }
-        if (rise > 0.5) {
-          const lip = Math.min(1, (rise - 0.5) / 0.5);
-          const curl = lip * lip * (3 - 2 * lip) * gather;
-          particle.vx += (perpX * particle.lane * 1.15 - axisX * 0.72) * this.flowSpeed * curl * deltaSeconds;
-          particle.vy += (perpY * particle.lane * 1.15 - axisY * 0.72) * this.flowSpeed * curl * deltaSeconds;
-        }
-      }
-
-      const spread = blooming ? this.disperse : 1;
-      if (spread > 0.02) {
-        const homePull = blooming ? 1.15 * this.disperse : 0.22;
-        particle.vx += (waveA * 7 + this.flowSpeed * 0.28 * (blooming ? 0.35 : 1)) * spread * deltaSeconds;
-        particle.vy += (waveB * 7 - this.flowSpeed * 0.35 * (blooming ? 0.2 : 1)) * spread * deltaSeconds;
-        particle.vx += (particle.homeX - particle.x) * homePull * deltaSeconds;
-        particle.vy += (particle.homeY - particle.y) * homePull * deltaSeconds;
-      }
-
-      particle.vx *= damping;
-      particle.vy *= damping;
-      particle.x += particle.vx * deltaSeconds;
-      particle.y += particle.vy * deltaSeconds;
-
-      const margin = particle.size * 2;
-      let wrapped = false;
-      const recycleFunnel = blooming && this.disperse < 0.42;
-      if (recycleFunnel) {
-        const alongNow =
-          (particle.x - originX) * axisX + (particle.y - originY) * axisY;
-        const offScreen =
-          particle.x < -margin ||
-          particle.x > this.width + margin ||
-          particle.y < -margin ||
-          particle.y > this.height + margin;
-        if (alongNow < -30) {
-          this.spawnAlongStem(particle);
-          wrapped = true;
-        } else if (offScreen || alongNow > bloomLength * 1.12) {
-          if (this.swipeHeld) {
-            wrapped = this.wrapScreen(particle, margin);
-          } else {
-            this.spawnAlongStem(particle);
-            wrapped = true;
-          }
-        }
-      } else {
-        wrapped = this.wrapScreen(particle, margin);
-      }
-
-      if (wrapped) {
-        particle.px = particle.x;
-        particle.py = particle.y;
-        particle.qx = particle.x;
-        particle.qy = particle.y;
-      } else {
-        const followHead = 1 - Math.pow(0.84, frames);
-        const followTail = 1 - Math.pow(0.9, frames);
-        particle.px += (particle.x - particle.px) * followHead;
-        particle.py += (particle.y - particle.py) * followHead;
-        particle.qx += (particle.px - particle.qx) * followTail;
-        particle.qy += (particle.py - particle.qy) * followTail;
-      }
-
-      const size =
-        particle.size * (1 + this.sizePulse * 0.5 + (blooming ? 0.18 : 0) + blowEnergy * 0.08);
-      const brightness =
-        particle.brightness *
-        (0.52 + this.glowPulse * 0.95 + (blooming ? 3 : blowLevel) * 0.12 + waveA * 0.06);
-
-      const offset = i * FLOATS_PER_PARTICLE;
-      this.vertexData[offset] = particle.x;
-      this.vertexData[offset + 1] = particle.y;
-      this.vertexData[offset + 2] = size;
-      this.vertexData[offset + 3] = brightness;
-
-      const trailOffset = i * 4 * FLOATS_PER_TRAIL_VERTEX;
-      const head = brightness * this.trailFade * 0.9;
-      const mid = brightness * this.trailFade * 0.4;
-      this.trailData[trailOffset] = particle.x;
-      this.trailData[trailOffset + 1] = particle.y;
-      this.trailData[trailOffset + 2] = head;
-      this.trailData[trailOffset + 3] = particle.px;
-      this.trailData[trailOffset + 4] = particle.py;
-      this.trailData[trailOffset + 5] = mid;
-      this.trailData[trailOffset + 6] = particle.px;
-      this.trailData[trailOffset + 7] = particle.py;
-      this.trailData[trailOffset + 8] = mid;
-      this.trailData[trailOffset + 9] = particle.qx;
-      this.trailData[trailOffset + 10] = particle.qy;
-      this.trailData[trailOffset + 11] = 0;
-    }
-
-    if (this.swipeActive && !this.swipeHeld && this.disperse > 0.92) {
-      this.swipeActive = false;
-    }
-  }
-
-  draw() {
-    const gl = this.gl;
-    this.drawParticles();
-    if (this.trailFade > 0.04) this.drawTrails();
-    gl.useProgram(this.particleProgram);
-  }
-
-  drawParticles() {
-    const gl = this.gl;
-    const stride = FLOATS_PER_PARTICLE * Float32Array.BYTES_PER_ELEMENT;
-
-    gl.useProgram(this.particleProgram);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.vertexData);
-
-    gl.enableVertexAttribArray(this.particleLocations.position);
-    gl.vertexAttribPointer(this.particleLocations.position, 2, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(this.particleLocations.size);
-    gl.vertexAttribPointer(
-      this.particleLocations.size,
-      1,
-      gl.FLOAT,
-      false,
-      stride,
-      2 * Float32Array.BYTES_PER_ELEMENT,
-    );
-    gl.enableVertexAttribArray(this.particleLocations.brightness);
-    gl.vertexAttribPointer(
-      this.particleLocations.brightness,
-      1,
-      gl.FLOAT,
-      false,
-      stride,
-      3 * Float32Array.BYTES_PER_ELEMENT,
-    );
-
-    gl.uniform2f(this.particleLocations.resolution, this.width, this.height);
-    gl.uniform1f(this.particleLocations.pixelRatio, this.pixelRatio);
-    gl.uniform1f(this.particleLocations.waterSheen, this.waterSheen);
-    gl.uniform1i(this.particleLocations.noise, 0);
-    gl.drawArrays(gl.POINTS, 0, PARTICLE_COUNT);
-  }
-
-  drawTrails() {
-    const gl = this.gl;
-    const stride = FLOATS_PER_TRAIL_VERTEX * Float32Array.BYTES_PER_ELEMENT;
-
-    gl.useProgram(this.trailProgram);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.trailData);
-
-    gl.enableVertexAttribArray(this.trailLocations.position);
-    gl.vertexAttribPointer(this.trailLocations.position, 2, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(this.trailLocations.brightness);
-    gl.vertexAttribPointer(
-      this.trailLocations.brightness,
-      1,
-      gl.FLOAT,
-      false,
-      stride,
-      2 * Float32Array.BYTES_PER_ELEMENT,
-    );
-
-    gl.uniform2f(this.trailLocations.resolution, this.width, this.height);
-    gl.drawArrays(gl.LINES, 0, PARTICLE_COUNT * 4);
-  }
-}
-
-function compileShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const message = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`Shader compile error: ${message}`);
-  }
-  return shader;
-}
-
-function createProgram(gl, vertexSource, fragmentSource) {
-  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
-  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
-  const program = gl.createProgram();
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-  gl.deleteShader(vertexShader);
-  gl.deleteShader(fragmentShader);
-
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const message = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`Program link error: ${message}`);
-  }
-  return program;
-}
-
-function createNoiseTexture(gl) {
-  const size = 64;
-  const pixels = new Uint8Array(size * size * 4);
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const index = (y * size + x) * 4;
-      const grain = Math.random();
-      const cloudy = Math.sin(x * 0.29) * Math.cos(y * 0.23) * 0.18 + 0.5;
-      const value = Math.floor(Math.max(0, Math.min(1, grain * 0.58 + cloudy * 0.42)) * 255);
-      pixels[index] = value;
-      pixels[index + 1] = value;
-      pixels[index + 2] = value;
-      pixels[index + 3] = 255;
-    }
-  }
-
-  const texture = gl.createTexture();
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return texture;
+function showWebGLError() {
+  const message = document.createElement("p");
+  message.textContent = "この端末では WebGL2 が使えないため表示できません。";
+  message.style.cssText =
+    "position:fixed;inset:0;margin:auto;width:min(28rem,90vw);height:fit-content;color:#d7f4ff;font:1rem/1.6 sans-serif;text-align:center;";
+  document.body.append(message);
 }
 
 async function start() {
-  const gl = canvas.getContext("webgl", {
+  const gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
     depth: false,
     powerPreference: "high-performance",
   });
-  if (!gl) throw new Error("WebGL1 is not available.");
+  if (!gl) {
+    showWebGLError();
+    throw new Error("WebGL2 is not available.");
+  }
 
-  const particleProgram = createProgram(gl, particleVertSource, particleFragSource);
-  const trailProgram = createProgram(gl, trailVertSource, trailFragSource);
-  createNoiseTexture(gl);
+  const programs = {
+    particle: createProgram(gl, particleVertSource, particleFragSource),
+    particleQuad: createProgram(gl, particleQuadVertSource, particleQuadFragSource),
+    trail: createProgram(gl, trailVertSource, trailFragSource),
+    update: createProgram(gl, particleUpdateVertSource, emptyFragSource, [
+      "v_position",
+      "v_velocity",
+    ]),
+    splat: createProgram(gl, quadVertSource, splatFragSource),
+    advect: createProgram(gl, quadVertSource, advectFragSource),
+    divergence: createProgram(gl, quadVertSource, divergenceFragSource),
+    jacobi: createProgram(gl, quadVertSource, jacobiFragSource),
+    subtract: createProgram(gl, quadVertSource, subtractFragSource),
+    funnel: createProgram(gl, quadVertSource, funnelFragSource),
+  };
+  const noiseTexture = createNoiseTexture(gl);
+  const quality = detectQuality();
 
   gl.disable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
   gl.clearColor(0.006, 0.055, 0.16, 1);
 
-  const particles = new ParticleField(gl, particleProgram, trailProgram);
+  const field = new VelocityField(gl, programs, quality);
+  const particles = new ParticleField(gl, programs, noiseTexture, quality);
+  particles.field = field;
   const mic = new MicInput();
   const synth = new HybridSynth();
   let lastLevel = 0;
@@ -942,14 +461,20 @@ async function start() {
     mic.debugLevel = level == null ? null : Math.max(0, Math.min(3, Number(level) || 0));
   };
 
+  function restoreViewport() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+
   function resize() {
     const width = Math.max(1, window.innerWidth);
     const height = Math.max(1, window.innerHeight);
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, quality.dprCap);
     canvas.width = Math.round(width * pixelRatio);
     canvas.height = Math.round(height * pixelRatio);
-    gl.viewport(0, 0, canvas.width, canvas.height);
     particles.resize(width, height, pixelRatio);
+    field.resize(width, height);
+    restoreViewport();
   }
 
   window.addEventListener("resize", resize, { passive: true });
@@ -1019,7 +544,8 @@ async function start() {
   let previousTime = performance.now();
   const startedAt = previousTime;
   function frame(now) {
-    const deltaSeconds = Math.min((now - previousTime) / 1000, 0.033);
+    const rawDelta = (now - previousTime) / 1000;
+    const deltaSeconds = Math.min(rawDelta, 0.033);
     const elapsedSeconds = (now - startedAt) / 1000;
     previousTime = now;
 
@@ -1044,6 +570,10 @@ async function start() {
     if (mic.level === 3) synth.scheduleGrains();
 
     particles.update(deltaSeconds, elapsedSeconds, mic.energy, mic.level);
+    if (adaptQuality(quality, rawDelta * 1000, field, particles) && field.enabled) {
+      field.resize(particles.width, particles.height);
+    }
+    restoreViewport();
 
     gl.clear(gl.COLOR_BUFFER_BIT);
     particles.draw();
@@ -1059,5 +589,6 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 }
 
 start().catch((error) => {
+  window.__otoStartError = String(error && error.stack ? error.stack : error);
   console.error("OTO溜まりを開始できませんでした。", error);
 });

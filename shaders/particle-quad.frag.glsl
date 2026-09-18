@@ -8,15 +8,16 @@ uniform float u_blowLevel;
 
 in float v_brightness;
 in float v_water;
+in vec2 v_pointCoord;
 
 out vec4 fragColor;
 
 void main() {
-  vec2 centered = gl_PointCoord - 0.5;
+  vec2 centered = v_pointCoord - 0.5;
   float radius = length(centered);
   float halo = smoothstep(0.52, 0.05, radius);
   float core = smoothstep(0.2, 0.0, radius);
-  float noise = texture(u_noise, gl_PointCoord).r;
+  float noise = texture(u_noise, v_pointCoord).r;
   float level = mix(u_blowLevel, 3.0, u_blooming);
   float brightness = v_brightness * (0.52 + u_glowPulse * 0.95 + level * 0.12);
   float alpha = halo * mix(0.42, 1.0, noise) * brightness;
