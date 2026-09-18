@@ -44,6 +44,7 @@ export class VelocityField {
         "u_center",
         "u_strength",
         "u_radius",
+        "u_span",
         "u_aspect",
       ]),
     };
@@ -137,7 +138,7 @@ export class VelocityField {
     this.read = write;
   }
 
-  addVortex(x, y, strength, radius) {
+  addVortex(x, y, strength, radius, spanX = 0.2, spanY = 0.095) {
     if (!this.enabled) return;
     const write = 1 - this.read;
     this.blit(this.programs.vortex, this.velocity[write], () => {
@@ -148,6 +149,7 @@ export class VelocityField {
       gl.uniform2f(this.uniforms.vortex.u_center, x, 1 - y);
       gl.uniform1f(this.uniforms.vortex.u_strength, -strength);
       gl.uniform1f(this.uniforms.vortex.u_radius, Math.max(0.0002, radius));
+      gl.uniform2f(this.uniforms.vortex.u_span, spanX, spanY);
       gl.uniform1f(this.uniforms.vortex.u_aspect, this.aspect);
     });
     this.read = write;

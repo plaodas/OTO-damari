@@ -395,12 +395,11 @@ export class ParticleField {
     this.flowBoost = Math.max(this.flowBoost, 0.55 + force * 0.4);
     this.trailFade = Math.max(this.trailFade, 0.28 + force * 0.32);
     if (!this.field?.enabled) return;
-    const mag = 0.1 + force * 0.16;
-    const radius = 0.03 + force * 0.012;
-    const centers = [0.26, 0.5, 0.74];
+    const mag = 0.07 + force * 0.1;
+    const radius = 0.05;
+    const centers = [0.22, 0.5, 0.78];
     for (let i = 0; i < centers.length; i += 1) {
-      const sense = i % 2 === 0 ? 1 : -1;
-      this.field.addVortex(0.5, centers[i], sense * mag, radius);
+      this.field.addVortex(0.5, centers[i], mag, radius, 0.2, 0.095);
     }
   }
 
@@ -415,7 +414,7 @@ export class ParticleField {
     this.waterSheen *= Math.pow(0.96, frames);
     this.flowBoost *= Math.pow(0.97, frames);
     this.impactForce *= Math.pow(0.82, frames);
-    this.shakeForce *= Math.pow(0.88, frames);
+    this.shakeForce *= Math.pow(0.94, frames);
     const photoRate = this.photoTarget > this.photoAmount ? 0.18 : 0.42;
     const photoStep = photoRate * deltaSeconds;
     this.photoAmount += Math.max(-photoStep, Math.min(photoStep, this.photoTarget - this.photoAmount));

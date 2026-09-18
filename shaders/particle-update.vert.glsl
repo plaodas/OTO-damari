@@ -35,14 +35,16 @@ out vec2 v_velocity;
 
 vec2 shakeVortex(vec2 pos, vec2 center, float sense, float strength) {
   vec2 d = pos - center;
-  d.y *= 1.7;
-  float dist = length(d);
-  float mask = exp(-dot(d, d) / 0.03);
-  vec2 tangent = vec2(-d.y, d.x) / max(dist, 0.0008);
-  vec2 radial = d / max(dist, 0.0008);
-  float diamond = 0.62 + 0.38 * abs(d.x) / max(dist, 0.0008);
-  vec2 force = tangent * sense * strength * mask * diamond;
-  force -= radial * (dist - 0.1) * strength * mask * 0.5;
+  vec2 span = vec2(0.2, 0.095);
+  float diamond = abs(d.x) / span.x + abs(d.y) / span.y;
+  float ring = exp(-pow(diamond - 1.0, 2.0) / 0.055);
+  float near = exp(-pow(max(diamond - 1.0, 0.0), 2.0) / 0.28);
+  vec2 grad = vec2(sign(d.x) / span.x, sign(d.y) / span.y);
+  float glen = max(length(grad), 0.001);
+  vec2 tangent = vec2(-grad.y, grad.x) / glen;
+  vec2 normal = grad / glen;
+  vec2 force = tangent * sense * strength * ring;
+  force -= normal * (diamond - 1.0) * strength * 1.6 * near;
   return force;
 }
 
@@ -135,10 +137,10 @@ void main() {
   vel += u_tilt * (0.011 + tiltLen * 0.008) * (1.0 - photoHold * 0.9);
   vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
-    float curl = u_shake * 0.24;
-    vel += shakeVortex(pos, vec2(0.5, 0.26), 1.0, curl);
-    vel += shakeVortex(pos, vec2(0.5, 0.5), -1.0, curl);
-    vel += shakeVortex(pos, vec2(0.5, 0.74), 1.0, curl);
+    float curl = u_shake * 0.34;
+    vel += shakeVortex(pos, vec2(0.5, 0.22), 1.0, curl);
+    vel += shakeVortex(pos, vec2(0.5, 0.5), 1.0, curl);
+    vel += shakeVortex(pos, vec2(0.5, 0.78), 1.0, curl);
   }
 
   float damping = mix(mix(0.965, 0.96, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
