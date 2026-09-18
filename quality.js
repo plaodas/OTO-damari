@@ -5,7 +5,7 @@ export function detectQuality() {
   const dpr = window.devicePixelRatio || 1;
   return {
     isPhone,
-    particleCount: isPhone ? 12000 : 32000,
+    particleCount: isPhone ? 900 : 1400,
     jacobiIterations: isPhone ? 8 : 16,
     simMax: isPhone ? 192 : 256,
     simMin: 128,
@@ -30,7 +30,8 @@ export function adaptQuality(quality, frameMs, field, particles) {
     field.width = 0;
   }
   if (particles) {
-    particles.count = Math.max(quality.isPhone ? 8000 : 16000, Math.floor(particles.count * 0.65));
+    particles.count = Math.max(quality.isPhone ? 700 : 1000, Math.floor(particles.count * 0.65));
+    particles.trailCount = Math.min(360, particles.count);
   }
   return true;
 }

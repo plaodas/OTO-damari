@@ -9,6 +9,7 @@ export class ParticleField {
     this.programs = programs;
     this.noiseTexture = noiseTexture;
     this.count = quality.particleCount;
+    this.trailCount = Math.min(360, this.count);
     this.field = null;
     this.width = 1;
     this.height = 1;
@@ -118,13 +119,11 @@ export class ParticleField {
       const s = i * STATE_STRIDE;
       state[s] = Math.random();
       state[s + 1] = Math.random();
-      state[s + 2] = (Math.random() - 0.5) * 0.04;
-      state[s + 3] = (Math.random() - 0.5) * 0.04;
+      state[s + 2] = (Math.random() - 0.5) * 0.05;
+      state[s + 3] = (Math.random() - 0.5) * 0.05;
       const e = i * STATIC_STRIDE;
-      const sizeBase = this.count > 20000 ? 1.15 : this.count > 8000 ? 1.45 : 3;
-      const sizeRange = this.count > 20000 ? 2.4 : this.count > 8000 ? 3.4 : 9;
-      extra[e] = sizeBase + Math.random() * sizeRange;
-      extra[e + 1] = 0.28 + Math.random() * 0.5;
+      extra[e] = 3 + Math.random() * 9;
+      extra[e + 1] = 0.35 + Math.random() * 0.65;
       extra[e + 2] = Math.random() * 2 - 1;
       extra[e + 3] = Math.random() * Math.PI * 2;
       extra[e + 4] = Math.random();
@@ -265,8 +264,8 @@ export class ParticleField {
     this.bloomLength = Math.max(0.35, Math.hypot(toX - x, toY - y) / Math.max(this.width, this.height));
     this.pulse("strong");
     if (this.field?.enabled) {
-      this.field.splat(this.originX, this.originY, this.axisX * 0.22, this.axisY * 0.22, 0.016);
-      this.field.splat(this.lastSwipeX, this.lastSwipeY, this.axisX * 0.18, this.axisY * 0.18, 0.014);
+      this.field.splat(this.originX, this.originY, this.axisX * 0.08, this.axisY * 0.08, 0.012);
+      this.field.splat(this.lastSwipeX, this.lastSwipeY, this.axisX * 0.06, this.axisY * 0.06, 0.01);
     }
   }
 
@@ -279,9 +278,9 @@ export class ParticleField {
       Math.hypot(nx - this.originX, ny - this.originY),
     );
     if (this.field?.enabled) {
-      const fx = (nx - this.lastSwipeX) * 3.2;
-      const fy = (ny - this.lastSwipeY) * 3.2;
-      this.field.splat(nx, ny, fx, fy, 0.012);
+      const fx = (nx - this.lastSwipeX) * 0.9;
+      const fy = (ny - this.lastSwipeY) * 0.9;
+      this.field.splat(nx, ny, fx, fy, 0.01);
     }
     this.lastSwipeX = nx;
     this.lastSwipeY = ny;
@@ -296,7 +295,7 @@ export class ParticleField {
     this.impactY = y / this.height;
     this.impactForce = 1;
     if (this.field?.enabled) {
-      this.field.splat(this.impactX, this.impactY, 0, -0.08, 0.018);
+      this.field.splat(this.impactX, this.impactY, 0, -0.035, 0.02);
     }
   }
 
@@ -316,7 +315,7 @@ export class ParticleField {
     const flowTarget = [8, 11, 52, 132][flowLevel] + this.flowBoost * 36;
     this.flowSpeed += (flowTarget - this.flowSpeed) * Math.min(1, 0.08 * frames);
     this.trailFade = blooming
-      ? Math.min(1, this.trailFade + deltaSeconds * 4)
+      ? Math.min(0.42, this.trailFade + deltaSeconds * 2.4)
       : this.trailFade * Math.pow(0.9, frames);
 
     if (blowLevel === 3) this.setBlowOrigin();
@@ -340,25 +339,16 @@ export class ParticleField {
     this.burst = 0;
     if (blooming && this.disperse > 0.2 && !this.didBurst) {
       this.didBurst = true;
-      this.burst = 0.35;
+      this.burst = 0.08;
     }
 
     const flowUv = this.flowSpeed / Math.max(this.height, 1);
 
     if (this.field?.enabled) {
       if (blowLevel > 0) {
-        const strength = [0, 0.08, 0.16, 0.28][blowLevel];
-        const radius = [0, 0.01, 0.016, 0.028][blowLevel];
+        const strength = [0, 0.03, 0.055, 0.09][blowLevel];
+        const radius = [0, 0.008, 0.012, 0.018][blowLevel];
         this.field.splat(this.originX, this.originY, this.axisX * strength, this.axisY * strength, radius);
-        if (blowLevel === 3) {
-          this.field.splat(
-            this.originX + this.axisX * this.bloomLength * 0.32,
-            this.originY + this.axisY * this.bloomLength * 0.32,
-            this.axisX * strength * 0.45,
-            this.axisY * strength * 0.45,
-            radius * 1.15,
-          );
-        }
       }
       this.field.addFunnel({
         originX: this.originX,
@@ -377,6 +367,8 @@ export class ParticleField {
 
     const write = 1 - this.read;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindVertexArray(this.updateVaos[this.read]);
     gl.useProgram(this.programs.update);
     gl.activeTexture(gl.TEXTURE0);
@@ -456,7 +448,7 @@ export class ParticleField {
       gl.useProgram(this.programs.trail);
       gl.uniform2f(this.trailUniforms.u_resolution, this.width, this.height);
       gl.uniform1f(this.trailUniforms.u_trailFade, this.trailFade);
-      gl.drawArraysInstanced(gl.LINES, 0, 2, this.count);
+      gl.drawArraysInstanced(gl.LINES, 0, 2, this.trailCount);
     }
 
     gl.bindVertexArray(null);

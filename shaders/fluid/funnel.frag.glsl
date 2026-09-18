@@ -41,5 +41,5 @@ void main() {
     force += u_perp * sign(across + 0.00001) * u_flow * 0.7 * curl;
     force -= u_axis * u_flow * 0.35 * curl;
   }
-  fragColor = vec4(vel + force * mask * u_gather * u_dt * 6.0, 0.0, 1.0);
+  fragColor = vec4(vel + force * mask * u_gather * u_dt * 2.2, 0.0, 1.0);
 }

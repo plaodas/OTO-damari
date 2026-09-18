@@ -13,5 +13,5 @@ void main() {
   vec2 uv = gl_VertexID == 0 ? a_current : a_previous;
   vec2 clip = uv * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
-  v_brightness = gl_VertexID == 0 ? u_trailFade * 0.85 : 0.0;
+  v_brightness = gl_VertexID == 0 ? u_trailFade * 0.28 : 0.0;
 }

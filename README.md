@@ -26,7 +26,7 @@ npm run dev
 
 ## 描画と品質
 
-- 粒子は Transform Feedback で GPU 更新します。スマホは約 8,000〜16,000、PC は約 32,000 粒です
+- 粒子は Transform Feedback で GPU 更新します。見た目は海中のプランクトン寄せで、スマホ約 900、PC 約 1,400 粒です
 - 速度場は短辺 128、上限 256 の RGBA16F（`EXT_color_buffer_float`）です。Jacobi はスマホ 8 回、PC 16 回程度です
 - `devicePixelRatio` とフレーム時間を見て格子と Jacobi 回数を落とします
 - `gl_PointSize` 上限が小さい端末だけ、point sprite の代わりに instanced quad で描きます

@@ -40,11 +40,10 @@ void main() {
   if (u_hasField > 0.5) {
     vec2 field = texture(u_velocity, clamp(vec2(pos.x, 1.0 - pos.y), 0.002, 0.998)).xy;
     field.y = -field.y;
-    vel = mix(vel, field, min(1.0, 10.0 * u_dt));
-    vel += field * 0.45;
+    vel += field;
   }
 
-  if (u_gather > 0.02 && u_hasField < 0.5) {
+  if (u_gather > 0.02) {
     float theta = atan(across, max(0.012, along));
     float petal = 0.86 + 0.14 * pow(abs(cos(theta * 2.5)), 1.1);
     float tube = 0.14;
@@ -55,8 +54,9 @@ void main() {
     vec2 target = u_origin + u_axis * along + u_perp * targetAcross;
     vec2 tangent = normalize(u_axis * bloom + u_perp * a_lane * amp * 2.7 * pow(max(u, 0.0), 1.7) + vec2(0.0001));
     float speed = u_flowSpeed * (0.92 + rise * 0.4);
-    vel += (tangent * speed - vel) * min(1.0, 3.4 * u_dt) * u_gather;
-    float pull = 7.0 * u_gather * min(1.0, 0.18 + rise * 2.2);
+    float gatherMix = u_hasField > 0.5 ? 0.55 : 1.0;
+    vel += (tangent * speed - vel) * min(1.0, 3.4 * u_dt) * u_gather * gatherMix;
+    float pull = 7.0 * u_gather * min(1.0, 0.18 + rise * 2.2) * gatherMix;
     vel += (target - pos) * pull * u_dt;
     if (along < bloom * 0.22) vel += u_axis * u_flowSpeed * 1.6 * u_gather * u_dt;
   }
@@ -65,7 +65,8 @@ void main() {
     float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
     float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
     float homePull = u_blooming > 0.5 ? 1.15 * u_disperse : 0.22;
-    vel += vec2(waveA, waveB) * 0.08 * spread;
+    vec2 wander = vec2(waveA, waveB) * 0.028 + vec2(u_flowSpeed * 4.0, -u_flowSpeed * 4.6);
+    vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread;
     vel += (a_home - pos) * homePull * u_dt;
   }
 
