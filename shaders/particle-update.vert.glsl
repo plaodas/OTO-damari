@@ -9,6 +9,8 @@ in vec2 a_home;
 
 uniform sampler2D u_velocity;
 uniform float u_hasField;
+uniform sampler2D u_photoField;
+uniform float u_photoAmount;
 uniform float u_dt;
 uniform float u_time;
 uniform float u_gather;
@@ -71,6 +73,17 @@ void main() {
     vec2 wander = vec2(waveA, waveB) * 0.028;
     vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread;
     vel += (a_home - pos) * homePull * u_dt;
+  }
+
+  if (u_photoAmount > 0.001) {
+    vec4 photo = texture(u_photoField, vec2(a_home.x, 1.0 - a_home.y));
+    vec2 edgeOffset = (photo.rg - vec2(128.0 / 255.0)) * (255.0 / 127.0);
+    vec2 edgeTarget = a_home + edgeOffset;
+    float order = fract(a_phase * 0.6180339 + a_home.x * 0.37);
+    float revealed = smoothstep(order, min(1.0, order + 0.18), u_photoAmount);
+    float attraction = revealed * photo.a * mix(0.5, 1.0, photo.b);
+    vel += (edgeTarget - pos) * attraction * 2.8 * u_dt;
+    vel *= max(0.72, 1.0 - attraction * 1.8 * u_dt);
   }
 
   if (u_burst > 0.01 && ambient < 0.5) {

@@ -11,7 +11,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="OTO溜まり" />
-    <meta http-equiv="Permissions-Policy" content="accelerometer=*, gyroscope=*, magnetometer=*" />
+    <meta
+      http-equiv="Permissions-Policy"
+      content="accelerometer=*, gyroscope=*, magnetometer=*, camera=(self)"
+    />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -43,6 +46,103 @@
       canvas {
         display: block;
         touch-action: none;
+      }
+
+      .camera-button {
+        position: fixed;
+        left: max(12px, env(safe-area-inset-left));
+        bottom: max(12px, env(safe-area-inset-bottom));
+        z-index: 2;
+        display: grid;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        place-items: center;
+        color: #c8efff;
+        background: rgb(0 20 50 / 42%);
+        border: 1px solid rgb(150 225 255 / 12%);
+        border-radius: 50%;
+        font-size: 18px;
+        opacity: 0.45;
+        backdrop-filter: blur(8px);
+        cursor: pointer;
+        transition: opacity 180ms ease;
+      }
+
+      .camera-button:active,
+      .camera-button:focus-visible {
+        opacity: 1;
+      }
+
+      .camera-panel {
+        position: fixed;
+        inset: 0;
+        z-index: 4;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: #01112e;
+      }
+
+      .camera-panel[hidden] {
+        display: none;
+      }
+
+      .camera-preview {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .camera-message {
+        position: absolute;
+        top: max(18px, env(safe-area-inset-top));
+        left: 50%;
+        width: min(88vw, 30rem);
+        margin: 0;
+        padding: 8px 12px;
+        color: #d9f6ff;
+        background: rgb(0 15 40 / 58%);
+        border-radius: 999px;
+        font: 12px/1.4 system-ui, sans-serif;
+        text-align: center;
+        transform: translateX(-50%);
+        backdrop-filter: blur(8px);
+      }
+
+      .camera-actions {
+        position: absolute;
+        right: 0;
+        bottom: max(20px, env(safe-area-inset-bottom));
+        left: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+      }
+
+      .camera-action {
+        display: grid;
+        min-width: 48px;
+        height: 48px;
+        padding: 0 14px;
+        place-items: center;
+        color: #d9f6ff;
+        background: rgb(0 20 50 / 66%);
+        border: 1px solid rgb(180 235 255 / 32%);
+        border-radius: 999px;
+        font: 14px/1 system-ui, sans-serif;
+        backdrop-filter: blur(8px);
+      }
+
+      .camera-shutter {
+        width: 70px;
+        height: 70px;
+        padding: 7px;
+        background: rgb(220 250 255 / 24%);
+        border: 3px solid #e1faff;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 5px rgb(0 20 50 / 75%);
       }
 
       .volume-control {
@@ -108,6 +208,7 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        .camera-button,
         .volume-control,
         .volume-slider {
           transition: none;
@@ -117,6 +218,20 @@
   </head>
   <body>
     <canvas id="scene" tabindex="0" aria-label="青い光の粒子"></canvas>
+    <button class="camera-button" id="camera-button" type="button" aria-label="写真から粒子を作る">
+      <span aria-hidden="true">◉</span>
+    </button>
+    <div class="camera-panel" id="camera-panel" hidden>
+      <video class="camera-preview" id="camera-preview" playsinline muted></video>
+      <p class="camera-message" id="camera-message">
+        写真はこの端末のメモリ内だけで処理され、保存・送信されません
+      </p>
+      <div class="camera-actions">
+        <button class="camera-action" id="camera-close" type="button">閉じる</button>
+        <button class="camera-action camera-shutter" id="camera-shutter" type="button" aria-label="撮影"></button>
+        <button class="camera-action" id="camera-clear" type="button">消す</button>
+      </div>
+    </div>
     <div class="volume-control" id="volume-control">
       <button
         class="volume-button"

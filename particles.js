@@ -39,10 +39,14 @@ export class ParticleField {
     this.tiltX = 0;
     this.tiltY = 0;
     this.shakeForce = 0;
+    this.photoAmount = 0;
+    this.photoTarget = 0;
 
     this.updateUniforms = getUniforms(gl, programs.update, [
       "u_velocity",
       "u_hasField",
+      "u_photoField",
+      "u_photoAmount",
       "u_dt",
       "u_time",
       "u_gather",
@@ -88,6 +92,7 @@ export class ParticleField {
         ])
       : null;
     this.dummyVelocity = this.createDummyVelocity();
+    this.photoTexture = this.createPhotoTexture();
     this.trailUniforms = getUniforms(gl, programs.trail, ["u_resolution", "u_trailFade"]);
     this.impactX = 0.5;
     this.impactY = 0.5;
@@ -113,6 +118,28 @@ export class ParticleField {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    return texture;
+  }
+
+  createPhotoTexture() {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([128, 128, 0, 0]),
+    );
     return texture;
   }
 
@@ -316,6 +343,32 @@ export class ParticleField {
     this.tiltY = y;
   }
 
+  setPhotoField({ width, height, pixels }) {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.photoTexture);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      width,
+      height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixels,
+    );
+    gl.activeTexture(gl.TEXTURE0);
+    this.photoAmount = 0;
+    this.photoTarget = 1;
+    this.glowPulse = Math.max(this.glowPulse, 0.55);
+  }
+
+  clearPhotoField() {
+    this.photoTarget = 0;
+  }
+
   shake(amount) {
     const force = Math.max(0, Math.min(1.4, amount));
     this.shakeForce = Math.max(this.shakeForce, force);
@@ -342,6 +395,9 @@ export class ParticleField {
     this.flowBoost *= Math.pow(0.97, frames);
     this.impactForce *= Math.pow(0.82, frames);
     this.shakeForce *= Math.pow(0.78, frames);
+    const photoRate = this.photoTarget > this.photoAmount ? 0.2 : 0.5;
+    const photoStep = photoRate * deltaSeconds;
+    this.photoAmount += Math.max(-photoStep, Math.min(photoStep, this.photoTarget - this.photoAmount));
     this.blowEnergy = blowEnergy;
     this.blowLevel = blowLevel;
 
@@ -410,6 +466,10 @@ export class ParticleField {
     gl.bindTexture(gl.TEXTURE_2D, this.field?.texture || this.dummyVelocity);
     gl.uniform1i(this.updateUniforms.u_velocity, 0);
     gl.uniform1f(this.updateUniforms.u_hasField, this.field?.enabled ? 1 : 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.photoTexture);
+    gl.uniform1i(this.updateUniforms.u_photoField, 1);
+    gl.uniform1f(this.updateUniforms.u_photoAmount, this.photoAmount);
     gl.uniform1f(this.updateUniforms.u_dt, deltaSeconds);
     gl.uniform1f(this.updateUniforms.u_time, elapsedSeconds);
     gl.uniform1f(this.updateUniforms.u_gather, gather);
@@ -437,6 +497,7 @@ export class ParticleField {
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
     gl.bindVertexArray(null);
+    gl.activeTexture(gl.TEXTURE0);
     this.read = write;
 
     if (this.swipeActive && !this.swipeHeld && this.disperse > 0.92) {

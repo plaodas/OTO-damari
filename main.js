@@ -17,6 +17,7 @@ import { createNoiseTexture, createProgram } from "./gl.js";
 import { adaptQuality, detectQuality } from "./quality.js";
 import { VelocityField } from "./fluid.js";
 import { ParticleField } from "./particles.js";
+import { estimateDepthEdges } from "./photo-depth.js";
 
 const GRAIN_VOICES = 3;
 
@@ -28,6 +29,13 @@ const volumeControl = document.querySelector("#volume-control");
 const volumeButton = document.querySelector("#volume-button");
 const volumeSlider = document.querySelector("#volume-slider");
 const volumeIcon = document.querySelector("#volume-icon");
+const cameraButton = document.querySelector("#camera-button");
+const cameraPanel = document.querySelector("#camera-panel");
+const cameraPreview = document.querySelector("#camera-preview");
+const cameraMessage = document.querySelector("#camera-message");
+const cameraClose = document.querySelector("#camera-close");
+const cameraShutter = document.querySelector("#camera-shutter");
+const cameraClear = document.querySelector("#camera-clear");
 
 function readStoredVolume() {
   try {
@@ -673,6 +681,90 @@ async function start() {
   });
   volumeSlider.addEventListener("change", scheduleVolumeControlClose);
   updateVolumeControl();
+
+  let cameraStream = null;
+  let cameraRequestId = 0;
+
+  function stopCamera() {
+    cameraRequestId += 1;
+    if (cameraStream) {
+      for (const track of cameraStream.getTracks()) track.stop();
+    }
+    cameraStream = null;
+    cameraPreview.pause();
+    cameraPreview.srcObject = null;
+    cameraPanel.hidden = true;
+    cameraShutter.disabled = true;
+  }
+
+  async function openCamera() {
+    const requestId = ++cameraRequestId;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      cameraPanel.hidden = false;
+      cameraShutter.disabled = true;
+      cameraMessage.textContent = "この端末ではカメラを利用できません";
+      return;
+    }
+
+    cameraPanel.hidden = false;
+    cameraShutter.disabled = true;
+    cameraMessage.textContent = "カメラを準備しています…";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 1280 },
+        },
+        audio: false,
+      });
+      if (requestId !== cameraRequestId) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      cameraStream = stream;
+      cameraPreview.srcObject = cameraStream;
+      await cameraPreview.play();
+      cameraShutter.disabled = false;
+      cameraMessage.textContent =
+        "写真はこの端末のメモリ内だけで処理され、保存・送信されません";
+    } catch (error) {
+      if (requestId !== cameraRequestId) return;
+      console.warn("カメラを開始できませんでした。", error);
+      cameraMessage.textContent = "カメラを開始できませんでした";
+    }
+  }
+
+  cameraButton.addEventListener("click", openCamera);
+  cameraClose.addEventListener("click", stopCamera);
+  cameraClear.addEventListener("click", () => {
+    particles.clearPhotoField();
+    stopCamera();
+  });
+  cameraShutter.addEventListener("click", () => {
+    if (!cameraStream || cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    cameraShutter.disabled = true;
+    cameraMessage.textContent = "奥行きと輪郭を読み取っています…";
+    requestAnimationFrame(() => {
+      try {
+        const fieldData = estimateDepthEdges(
+          cameraPreview,
+          window.innerWidth,
+          window.innerHeight,
+          false,
+        );
+        particles.setPhotoField(fieldData);
+        synth.unlock();
+        synth.playKirari();
+        stopCamera();
+      } catch (error) {
+        console.warn("写真を解析できませんでした。", error);
+        cameraMessage.textContent = "写真を解析できませんでした";
+        cameraShutter.disabled = false;
+      }
+    });
+  });
+  window.addEventListener("pagehide", stopCamera);
 
   window.__otoSetLevel = (level) => {
     mic.debugLevel = level == null ? null : Math.max(0, Math.min(3, Number(level) || 0));
