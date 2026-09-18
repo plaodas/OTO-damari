@@ -356,13 +356,7 @@ function extractContour(luminance, width, height) {
   return collectContour(fallback, nms, width, height);
 }
 
-export function estimateDepthEdges(
-  source,
-  viewportWidth,
-  viewportHeight,
-  targetCount,
-  mirror = false,
-) {
+function captureCoverCanvas(source, viewportWidth, viewportHeight, mirror = false) {
   const aspect = Math.max(0.5, Math.min(2, viewportWidth / Math.max(1, viewportHeight)));
   const width = aspect >= 1 ? MAX_DIMENSION : Math.max(160, Math.round(MAX_DIMENSION * aspect));
   const height = aspect >= 1 ? Math.max(160, Math.round(MAX_DIMENSION / aspect)) : MAX_DIMENSION;
@@ -386,9 +380,13 @@ export function estimateDepthEdges(
   }
   context.drawImage(source, drawX, drawY, drawWidth, drawHeight);
   context.restore();
+  return canvas;
+}
 
-  const image = context.getImageData(0, 0, width, height);
-  const luminance = new Float32Array(width * height);
+function canvasLuminance(canvas) {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  const luminance = new Float32Array(canvas.width * canvas.height);
   for (let i = 0; i < luminance.length; i += 1) {
     const offset = i * 4;
     luminance[i] =
@@ -397,11 +395,135 @@ export function estimateDepthEdges(
         image.data[offset + 2] * 0.0722) /
       255;
   }
+  return luminance;
+}
 
-  const contour = extractContour(luminance, width, height);
+function resizeFloat(source, sourceWidth, sourceHeight, width, height) {
+  const output = new Float32Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    const fy = ((y + 0.5) * sourceHeight) / height - 0.5;
+    const y0 = Math.max(0, Math.floor(fy));
+    const y1 = Math.min(sourceHeight - 1, y0 + 1);
+    const ty = fy - y0;
+    for (let x = 0; x < width; x += 1) {
+      const fx = ((x + 0.5) * sourceWidth) / width - 0.5;
+      const x0 = Math.max(0, Math.floor(fx));
+      const x1 = Math.min(sourceWidth - 1, x0 + 1);
+      const tx = fx - x0;
+      const v00 = source[y0 * sourceWidth + x0];
+      const v10 = source[y0 * sourceWidth + x1];
+      const v01 = source[y1 * sourceWidth + x0];
+      const v11 = source[y1 * sourceWidth + x1];
+      output[y * width + x] =
+        v00 * (1 - tx) * (1 - ty) + v10 * tx * (1 - ty) + v01 * (1 - tx) * ty + v11 * tx * ty;
+    }
+  }
+  return output;
+}
+
+function normalizeDepth(values) {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  const span = Math.max(1e-5, max - min);
+  const output = new Float32Array(values.length);
+  for (let i = 0; i < values.length; i += 1) {
+    output[i] = (values[i] - min) / span;
+  }
+  return output;
+}
+
+function contourFromDepth(depth, personMask, width, height) {
+  const near = normalizeDepth(depth);
+  const { mag, gx, gy } = sobel(near, width, height);
+  const nms = nonMaxSuppression(mag, gx, gy, width, height);
+  for (let i = 0; i < nms.length; i += 1) {
+    const person = personMask ? personMask[i] : 1;
+    nms[i] *= (0.35 + 0.65 * person) * (0.55 + 0.45 * near[i]);
+  }
+
+  const positives = [];
+  for (let i = 0; i < nms.length; i += 1) {
+    if (nms[i] > 0) positives.push(nms[i]);
+  }
+  const high = Math.max(0.012, percentile(positives, 0.88));
+  const keep = hysteresis(nms, width, height, high * 0.38, high);
+  if (personMask) {
+    const binary = new Uint8Array(personMask.length);
+    for (let i = 0; i < personMask.length; i += 1) binary[i] = personMask[i] > 0.5 ? 1 : 0;
+    const outline = silhouette(binary, width, height);
+    if (outline.length >= 60) return outline;
+  }
+  const contour = collectContour(keep, nms, width, height);
+  if (contour.length >= 48) return contour;
+
+  const ranked = [];
+  for (let i = 0; i < nms.length; i += 1) {
+    if (nms[i] > 0) ranked.push({ i, v: nms[i] });
+  }
+  ranked.sort((a, b) => b.v - a.v);
+  const fallback = new Uint8Array(nms.length);
+  const take = Math.min(ranked.length, Math.max(160, Math.floor(ranked.length * 0.05)));
+  for (let n = 0; n < take; n += 1) fallback[ranked[n].i] = 1;
+  return collectContour(fallback, nms, width, height);
+}
+
+export function estimateDepthEdges(
+  source,
+  viewportWidth,
+  viewportHeight,
+  targetCount,
+  mirror = false,
+) {
+  const canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
+  const luminance = canvasLuminance(canvas);
+  const contour = extractContour(luminance, canvas.width, canvas.height);
   return {
     width: targetCount,
     height: 1,
-    pixels: packTargets(contour, width, height, targetCount),
+    pixels: packTargets(contour, canvas.width, canvas.height, targetCount),
+  };
+}
+
+export async function estimatePhotoField(
+  source,
+  viewportWidth,
+  viewportHeight,
+  targetCount,
+  mirror = false,
+) {
+  const canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
+  try {
+    const { estimateMidasDepth, segmentPerson } = await import("./photo-ml.js");
+    const depth = await estimateMidasDepth(canvas);
+    if (depth) {
+      const person = await segmentPerson(canvas);
+      const depthFull = resizeFloat(depth.values, depth.width, depth.height, canvas.width, canvas.height);
+      const personFull = person
+        ? resizeFloat(person.values, person.width, person.height, canvas.width, canvas.height)
+        : null;
+      const contour = contourFromDepth(depthFull, personFull, canvas.width, canvas.height);
+      if (contour.length >= 32) {
+        return {
+          width: targetCount,
+          height: 1,
+          pixels: packTargets(contour, canvas.width, canvas.height, targetCount),
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("奥行き推定に失敗したため、従来の輪郭処理へ切り替えます。", error);
+  }
+
+  const luminance = canvasLuminance(canvas);
+  const contour = extractContour(luminance, canvas.width, canvas.height);
+  return {
+    width: targetCount,
+    height: 1,
+    pixels: packTargets(contour, canvas.width, canvas.height, targetCount),
   };
 }

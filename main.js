@@ -17,7 +17,7 @@ import { createNoiseTexture, createProgram } from "./gl.js";
 import { adaptQuality, detectQuality } from "./quality.js";
 import { VelocityField } from "./fluid.js";
 import { ParticleField } from "./particles.js";
-import { estimateDepthEdges } from "./photo-depth.js";
+import { estimatePhotoField } from "./photo-depth.js";
 
 const GRAIN_VOICES = 3;
 
@@ -708,7 +708,7 @@ async function start() {
 
     cameraPanel.hidden = false;
     cameraShutter.disabled = true;
-    cameraMessage.textContent = "カメラを準備しています…";
+    cameraMessage.textContent = "奥行きモデルを準備しています…";
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -725,9 +725,14 @@ async function start() {
       cameraStream = stream;
       cameraPreview.srcObject = cameraStream;
       await cameraPreview.play();
+      const { photoModelStatus, warmupPhotoModels } = await import("./photo-ml.js");
+      await warmupPhotoModels();
+      if (requestId !== cameraRequestId) return;
       cameraShutter.disabled = false;
-      cameraMessage.textContent =
-        "写真はこの端末のメモリ内だけで処理され、保存・送信されません";
+      const models = photoModelStatus();
+      cameraMessage.textContent = models.depth
+        ? "写真はこの端末のメモリ内だけで処理され、保存・送信されません"
+        : "モデルを読めなかったため、端末内の簡易な輪郭処理で続行します";
     } catch (error) {
       if (requestId !== cameraRequestId) return;
       console.warn("カメラを開始できませんでした。", error);
@@ -741,29 +746,27 @@ async function start() {
     particles.clearPhotoField();
     stopCamera();
   });
-  cameraShutter.addEventListener("click", () => {
+  cameraShutter.addEventListener("click", async () => {
     if (!cameraStream || cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
     cameraShutter.disabled = true;
-    cameraMessage.textContent = "奥行きと輪郭を読み取っています…";
-    requestAnimationFrame(() => {
-      try {
-        const fieldData = estimateDepthEdges(
-          cameraPreview,
-          window.innerWidth,
-          window.innerHeight,
-          particles.count,
-          false,
-        );
-        particles.setPhotoField(fieldData);
-        synth.unlock();
-        synth.playKirari();
-        stopCamera();
-      } catch (error) {
-        console.warn("写真を解析できませんでした。", error);
-        cameraMessage.textContent = "写真を解析できませんでした";
-        cameraShutter.disabled = false;
-      }
-    });
+    cameraMessage.textContent = "奥行きを読み取っています…";
+    try {
+      const fieldData = await estimatePhotoField(
+        cameraPreview,
+        window.innerWidth,
+        window.innerHeight,
+        particles.count,
+        false,
+      );
+      particles.setPhotoField(fieldData);
+      synth.unlock();
+      synth.playKirari();
+      stopCamera();
+    } catch (error) {
+      console.warn("写真を解析できませんでした。", error);
+      cameraMessage.textContent = "写真を解析できませんでした";
+      cameraShutter.disabled = false;
+    }
   });
   window.addEventListener("pagehide", stopCamera);
 

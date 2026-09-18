@@ -25,6 +25,7 @@ npm run dev
 - 強は吹き続けているあいだ約16ms間隔で粒が連続します
 - マイクを拒否すると吹きかけ検出だけが無効になり、粒子表示とタップ操作は継続します
 - カメラ画像は低解像度化して端末のメモリ内だけで解析します。アップロード、ファイル保存、Web Storageへの保存は行わず、撮影または「閉じる」の直後にカメラを停止します
+- カメラを開くと TensorFlow.js の MiDaS v2.1 small（奥行き）を読み込み、人物がいれば Selfie Segmentation で背景の深度ノイズを弱めます。モデルが読めない端末では従来の輪郭処理へ落ちます
 - カメラ画面の「消す」で写真由来の粒子配置を解除できます
 
 ## 描画と品質
@@ -76,11 +77,13 @@ npm run preview
 ├── fluid.js
 ├── particles.js
 ├── photo-depth.js
+├── photo-ml.js
 ├── gl.js
 ├── quality.js
 ├── public
 │   ├── apple-touch-icon.png
 │   ├── icons
+│   ├── models
 │   ├── manifest.webmanifest
 │   └── sw.js
 └── shaders

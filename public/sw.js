@@ -1,4 +1,4 @@
-const CACHE_NAME = "oto-damari-v1";
+const CACHE_NAME = "oto-damari-v2";
 const PRECACHE = ["/", "/index.html", "/manifest.webmanifest", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
