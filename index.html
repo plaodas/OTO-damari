@@ -85,6 +85,18 @@
 
       .mode-title {
         font-size: clamp(24px, 7vw, 38px);
+        animation: title-breathe 8s ease-in-out infinite;
+      }
+
+      @keyframes title-breathe {
+        0%,
+        100% {
+          opacity: 0;
+        }
+        32%,
+        52% {
+          opacity: 1;
+        }
       }
 
       .complete-message {
@@ -300,6 +312,11 @@
         .volume-control,
         .volume-slider {
           transition: none;
+        }
+
+        .mode-title {
+          animation: none;
+          opacity: 1;
         }
       }
     </style>
