@@ -31,7 +31,7 @@ void main() {
 
   float north = u_north;
   vec3 haloCol = mix(vec3(0.04, 0.42, 0.95), vec3(0.95, 0.08, 0.05), north);
-  vec3 coreCol = mix(vec3(0.55, 0.95, 1.0), vec3(1.0, 0.9, 0.86), north);
+  vec3 coreCol = mix(vec3(0.55, 0.95, 1.0), vec3(1.0, 0.97, 0.95), north);
   vec3 color = mix(haloCol, coreCol, core);
   color = mix(color, vec3(0.78, 0.96, 1.0), v_water * 0.6 * (1.0 - north));
   color = mix(color, vec3(0.14, 0.98, 0.4), ring * emit * 0.4 * (1.0 - north * 0.9));
