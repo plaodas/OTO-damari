@@ -1269,7 +1269,7 @@ async function start() {
     const shouldResonate = !pointer.swiping && event?.type !== "pointercancel";
     if (pointer.swiping) {
       particles.releaseSwipe();
-      if (mic.level !== 3) synth.stopShimmer();
+      synth.stopShimmer();
     }
     pointer = null;
     if (shouldResonate) triggerResonance();
@@ -1288,7 +1288,6 @@ async function start() {
     canvas.setPointerCapture?.(event.pointerId);
 
     const context = synth.unlock();
-    synth.playTap();
     motion.start();
     motion.bind();
     if (context && navigator.mediaDevices?.getUserMedia) {
@@ -1307,7 +1306,7 @@ async function start() {
       synth.unlock();
       synth.playKirari();
       triggerResonance();
-      if (mic.level !== 3) synth.startShimmer();
+      synth.startShimmer();
     }
     if (pointer.swiping) particles.steerSwipe(point.x, point.y);
   });
@@ -1340,16 +1339,11 @@ async function start() {
       northWasActive = false;
     }
     if (mic.level !== lastLevel) {
-      if (mic.level === 3) synth.startShimmer();
-      else synth.stopShimmer();
-
       if (mic.level > lastLevel) {
         triggerResonance();
         if (mic.level === 1) {
-          synth.playChirin();
           particles.pulse("weak");
         } else if (mic.level === 2) {
-          synth.playKirari();
           particles.pulse("medium");
         } else if (mic.level === 3) {
           particles.pulse("strong");
@@ -1357,7 +1351,7 @@ async function start() {
       }
       lastLevel = mic.level;
     }
-    if (mic.level === 3) synth.scheduleGrains();
+    synth.scheduleGrains();
 
     particles.update(deltaSeconds, elapsedSeconds, mic.energy, mic.level);
     if (adaptQuality(quality, rawDelta * 1000, field, particles) && field.enabled) {
