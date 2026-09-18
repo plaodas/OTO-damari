@@ -79,6 +79,7 @@ export class ParticleField {
       "u_glowPulse",
       "u_glowFade",
       "u_blowLevel",
+      "u_north",
       "u_noise",
       "u_maxPointSize",
     ]);
@@ -95,6 +96,7 @@ export class ParticleField {
           "u_glowPulse",
           "u_glowFade",
           "u_blowLevel",
+          "u_north",
           "u_noise",
         ])
       : null;
@@ -553,6 +555,7 @@ export class ParticleField {
       gl.uniform1f(this.quadUniforms.u_glowPulse, this.glowPulse);
       gl.uniform1f(this.quadUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.quadUniforms.u_blowLevel, this.blowLevel || 0);
+      gl.uniform1f(this.quadUniforms.u_north, this.north || 0);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
     } else {
       gl.bindVertexArray(this.drawVaos[this.read]);
@@ -567,6 +570,7 @@ export class ParticleField {
       gl.uniform1f(this.drawUniforms.u_glowPulse, this.glowPulse);
       gl.uniform1f(this.drawUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.drawUniforms.u_blowLevel, this.blowLevel || 0);
+      gl.uniform1f(this.drawUniforms.u_north, this.north || 0);
       gl.uniform1f(this.drawUniforms.u_maxPointSize, this.maxPointSize);
       gl.drawArrays(gl.POINTS, 0, this.count);
     }
