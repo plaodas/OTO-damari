@@ -29,6 +29,9 @@ uniform vec2 u_tilt;
 uniform float u_shake;
 uniform float u_blowLevel;
 uniform float u_north;
+uniform float u_guideAmount;
+uniform float u_guideMotion;
+uniform float u_guideStrength;
 
 out vec2 v_position;
 out vec2 v_velocity;
@@ -112,6 +115,7 @@ void main() {
       ambient > 0.5 ? 0.22 : 0.16,
       idle
     ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88) * (1.0 - smoothstep(0.03, 0.14, u_shake));
+    homePull *= 1.0 - max(u_guideMotion, 0.0) * u_guideStrength * 0.62;
     vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.01, idle);
     wander += vec2(swellA, swellB) * idle * 0.018;
     float freedom = 1.0 - photoHold * 0.88;
@@ -153,6 +157,16 @@ void main() {
     vel += shakeVortex(pos, vec2(0.5, 0.5), 1.0, curl);
     vel += shakeVortex(pos, vec2(0.5, 0.78), 1.0, curl);
     vel += shakeConvection(pos, u_shake * 0.26);
+  }
+
+  if (u_guideStrength > 0.001 && photoHold < 0.2) {
+    vec2 guideDelta = pos - vec2(0.5);
+    float guideDistance = length(guideDelta);
+    vec2 guideRadial = guideDelta / max(guideDistance, 0.018);
+    float guideEdge = smoothstep(0.03, 0.42, guideDistance);
+    float guideForce = u_guideMotion * u_guideStrength * (0.0011 + guideEdge * 0.0014);
+    vel += guideRadial * guideForce;
+    vel += (vec2(0.5) - pos) * (1.0 - u_guideAmount) * u_guideStrength * 0.00045;
   }
 
   float damping = mix(mix(0.965, 0.96, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));

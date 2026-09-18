@@ -20,6 +20,9 @@ export class ParticleField {
     this.sizePulse = 0;
     this.resonanceAge = Infinity;
     this.resonanceAmount = 0;
+    this.guideAmount = 0;
+    this.guideMotion = 0;
+    this.guideStrength = 0;
     this.waterSheen = 0;
     this.flowBoost = 0;
     this.flowSpeed = 5;
@@ -70,6 +73,9 @@ export class ParticleField {
       "u_shake",
       "u_blowLevel",
       "u_north",
+      "u_guideAmount",
+      "u_guideMotion",
+      "u_guideStrength",
     ]);
     this.drawUniforms = getUniforms(gl, programs.particle, [
       "u_resolution",
@@ -277,6 +283,33 @@ export class ParticleField {
 
   pulseResonance() {
     this.resonanceAge = 0;
+  }
+
+  beginGuidedRest() {
+    this.clearPhotoField();
+    this.swipeActive = false;
+    this.swipeHeld = false;
+    this.bloomAge = 0;
+    this.disperse = 0;
+    this.didBurst = false;
+    this.burst = 0;
+    this.impactForce = 0;
+    this.shakeForce = 0;
+    this.tiltX = 0;
+    this.tiltY = 0;
+    this.north = 0;
+  }
+
+  setGuidedBreath(amount, motion, strength, reducedMotion = false) {
+    this.guideAmount = Math.max(0, Math.min(1, amount));
+    this.guideMotion = Math.max(-1, Math.min(1, motion)) * (reducedMotion ? 0.22 : 1);
+    this.guideStrength = Math.max(0, Math.min(1, strength));
+  }
+
+  clearGuidedBreath() {
+    this.guideAmount = 0;
+    this.guideMotion = 0;
+    this.guideStrength = 0;
   }
 
   setAxis(dx, dy) {
@@ -531,6 +564,9 @@ export class ParticleField {
     gl.uniform1f(this.updateUniforms.u_shake, this.shakeForce);
     gl.uniform1f(this.updateUniforms.u_blowLevel, this.blowLevel || 0);
     gl.uniform1f(this.updateUniforms.u_north, this.north || 0);
+    gl.uniform1f(this.updateUniforms.u_guideAmount, this.guideAmount);
+    gl.uniform1f(this.updateUniforms.u_guideMotion, this.guideMotion);
+    gl.uniform1f(this.updateUniforms.u_guideStrength, this.guideStrength);
 
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.transformFeedback);
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.stateBuffers[write]);
@@ -553,6 +589,8 @@ export class ParticleField {
   draw() {
     const gl = this.gl;
     const blooming = this.blowLevel === 3 || this.swipeActive ? 1 : 0;
+    const guideSize = this.guideStrength * (0.08 + this.guideAmount * 0.22);
+    const guideGlow = this.guideStrength * (0.05 + this.guideAmount * 0.14);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.activeTexture(gl.TEXTURE0);
@@ -566,13 +604,13 @@ export class ParticleField {
       gl.uniform1f(this.quadUniforms.u_waterSheen, this.waterSheen);
       gl.uniform1f(
         this.quadUniforms.u_sizePulse,
-        this.sizePulse + this.resonanceAmount * 0.18,
+        this.sizePulse + this.resonanceAmount * 0.18 + guideSize,
       );
       gl.uniform1f(this.quadUniforms.u_blowEnergy, this.blowEnergy || 0);
       gl.uniform1f(this.quadUniforms.u_blooming, blooming);
       gl.uniform1f(
         this.quadUniforms.u_glowPulse,
-        this.glowPulse + this.resonanceAmount * 0.16,
+        this.glowPulse + this.resonanceAmount * 0.16 + guideGlow,
       );
       gl.uniform1f(this.quadUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.quadUniforms.u_blowLevel, this.blowLevel || 0);
@@ -587,13 +625,13 @@ export class ParticleField {
       gl.uniform1f(this.drawUniforms.u_waterSheen, this.waterSheen);
       gl.uniform1f(
         this.drawUniforms.u_sizePulse,
-        this.sizePulse + this.resonanceAmount * 0.18,
+        this.sizePulse + this.resonanceAmount * 0.18 + guideSize,
       );
       gl.uniform1f(this.drawUniforms.u_blowEnergy, this.blowEnergy || 0);
       gl.uniform1f(this.drawUniforms.u_blooming, blooming);
       gl.uniform1f(
         this.drawUniforms.u_glowPulse,
-        this.glowPulse + this.resonanceAmount * 0.16,
+        this.glowPulse + this.resonanceAmount * 0.16 + guideGlow,
       );
       gl.uniform1f(this.drawUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.drawUniforms.u_blowLevel, this.blowLevel || 0);

@@ -19,6 +19,7 @@ import { adaptQuality, detectQuality } from "./quality.js";
 import { VelocityField } from "./fluid.js";
 import { ParticleField } from "./particles.js";
 import { estimatePhotoField } from "./photo-depth.js";
+import { GuidedRestSession } from "./guided-rest.js";
 
 const GRAIN_VOICES = 3;
 const SOLFEGGIO_FREQUENCIES = [174, 285, 396, 417, 528, 639, 741, 852, 963];
@@ -40,6 +41,14 @@ const cameraMessage = document.querySelector("#camera-message");
 const cameraClose = document.querySelector("#camera-close");
 const cameraShutter = document.querySelector("#camera-shutter");
 const cameraClear = document.querySelector("#camera-clear");
+const modeOverlay = document.querySelector("#mode-overlay");
+const landingView = document.querySelector("#landing-view");
+const completeView = document.querySelector("#complete-view");
+const guidedStart = document.querySelector("#guided-start");
+const freeplayStart = document.querySelector("#freeplay-start");
+const completeFreeplay = document.querySelector("#complete-freeplay");
+const guidedRestart = document.querySelector("#guided-restart");
+const guidedExit = document.querySelector("#guided-exit");
 
 function readStoredVolume() {
   try {
@@ -126,6 +135,10 @@ class MicInput {
       for (const track of this.stream.getTracks()) track.stop();
     }
     this.stream = null;
+    this.rms = 0;
+    this.energy = 0;
+    this.level = 0;
+    this.noiseFloor = 0.006;
   }
 
   classify(signal) {
@@ -716,6 +729,14 @@ class HybridSynth {
     }
   }
 
+  fadeAllResonances(release = 0.35) {
+    if (!this.context) return;
+    const startAt = this.context.currentTime;
+    for (const voice of this.resonanceVoices.splice(0)) {
+      this.fadeResonanceVoice(voice, startAt, release);
+    }
+  }
+
   triggerResonance() {
     const context = this.unlock();
     if (!context || !this.master) return false;
@@ -1075,6 +1096,9 @@ async function start() {
   const mic = new MicInput();
   const synth = new HybridSynth();
   const motion = new MotionInput();
+  const guidedRest = new GuidedRestSession();
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let appMode = "landing";
   let lastLevel = 0;
   let northWasActive = false;
 
@@ -1084,6 +1108,7 @@ async function start() {
   }
 
   motion.onShake = (amount) => {
+    if (appMode !== "freeplay") return;
     particles.shake(amount);
     synth.unlock();
     synth.playKirari();
@@ -1178,7 +1203,7 @@ async function start() {
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
 
-  function stopCamera() {
+  function stopCamera(restoreMic = true) {
     cameraRequestId += 1;
     if (cameraStream) {
       for (const track of cameraStream.getTracks()) track.stop();
@@ -1193,11 +1218,83 @@ async function start() {
     }
     cameraPanel.hidden = true;
     cameraShutter.disabled = true;
-    const context = synth.unlock();
-    mic.ensure(context);
+    if (restoreMic) {
+      const context = synth.unlock();
+      mic.ensure(context);
+    }
   }
 
+  function setAppMode(mode) {
+    appMode = mode;
+    document.body.classList.remove(
+      "mode-landing",
+      "mode-guided",
+      "mode-complete",
+      "mode-freeplay",
+    );
+    document.body.classList.add(`mode-${mode}`);
+  }
+
+  function startGuidedRest() {
+    setAppMode("guided");
+    modeOverlay.hidden = true;
+    landingView.hidden = false;
+    completeView.hidden = true;
+    guidedExit.hidden = false;
+    synth.stopBlowChord();
+    synth.fadeAllResonances();
+    particles.beginGuidedRest();
+    guidedRest.start();
+    lastLevel = 0;
+    northWasActive = false;
+    const context = synth.unlock();
+    if (context && navigator.mediaDevices?.getUserMedia) mic.ensure(context);
+  }
+
+  function startFreeplay() {
+    guidedRest.stop();
+    particles.clearGuidedBreath();
+    synth.stopBlowChord();
+    setAppMode("freeplay");
+    modeOverlay.hidden = true;
+    guidedExit.hidden = true;
+    canvas.focus();
+    lastLevel = 0;
+    northWasActive = false;
+    const context = synth.unlock();
+    motion.start();
+    motion.bind();
+    if (context && navigator.mediaDevices?.getUserMedia) mic.ensure(context);
+  }
+
+  function finishGuidedRest() {
+    if (appMode !== "guided") return;
+    guidedRest.stop();
+    particles.clearGuidedBreath();
+    synth.stopBlowChord();
+    synth.stopShimmer();
+    synth.fadeAllResonances(0.5);
+    mic.debugLevel = null;
+    mic.disconnect();
+    setAppMode("complete");
+    guidedExit.hidden = true;
+    landingView.hidden = true;
+    completeView.hidden = false;
+    modeOverlay.hidden = false;
+    completeFreeplay.focus();
+  }
+
+  guidedStart.addEventListener("click", startGuidedRest);
+  freeplayStart.addEventListener("click", startFreeplay);
+  completeFreeplay.addEventListener("click", startFreeplay);
+  guidedRestart.addEventListener("click", startGuidedRest);
+  guidedExit.addEventListener("click", finishGuidedRest);
+  document.addEventListener("visibilitychange", () => {
+    guidedRest.setPaused(document.hidden);
+  });
+
   async function openCamera() {
+    if (appMode !== "freeplay") return;
     const requestId = ++cameraRequestId;
     if (!navigator.mediaDevices?.getUserMedia) {
       cameraPanel.hidden = false;
@@ -1246,7 +1343,7 @@ async function start() {
   }
 
   cameraButton.addEventListener("click", openCamera);
-  cameraClose.addEventListener("click", stopCamera);
+  cameraClose.addEventListener("click", () => stopCamera());
   cameraClear.addEventListener("click", () => {
     particles.clearPhotoField();
     stopCamera();
@@ -1279,7 +1376,15 @@ async function start() {
       resumeGl();
     }
   });
-  window.addEventListener("pagehide", stopCamera);
+  window.addEventListener("pagehide", () => {
+    stopCamera(false);
+    guidedRest.stop();
+    particles.clearGuidedBreath();
+    synth.stopBlowChord();
+    synth.stopShimmer();
+    synth.fadeAllResonances(0.2);
+    mic.disconnect();
+  });
 
   window.__otoSetLevel = (level) => {
     mic.debugLevel = level == null ? null : Math.max(0, Math.min(3, Number(level) || 0));
@@ -1315,6 +1420,10 @@ async function start() {
   }
 
   function endPointer(event) {
+    if (appMode !== "freeplay") {
+      pointer = null;
+      return;
+    }
     if (!pointer) return;
     if (event && pointer.id != null && event.pointerId !== pointer.id) return;
     const shouldResonate = !pointer.swiping && event?.type !== "pointercancel";
@@ -1326,6 +1435,7 @@ async function start() {
   }
 
   canvas.addEventListener("pointerdown", (event) => {
+    if (appMode !== "freeplay") return;
     event.preventDefault();
     const point = localPoint(event);
     pointer = {
@@ -1346,6 +1456,7 @@ async function start() {
   });
 
   canvas.addEventListener("pointermove", (event) => {
+    if (appMode !== "freeplay") return;
     if (!pointer || event.pointerId !== pointer.id) return;
     event.preventDefault();
     const point = localPoint(event);
@@ -1377,33 +1488,57 @@ async function start() {
     const elapsedSeconds = (now - startedAt) / 1000;
     previousTime = now;
 
-    mic.update();
-    motion.update(deltaSeconds);
-    particles.setTilt(motion.tiltX, motion.tiltY, motion.north);
-    if (motion.north >= 0.65 && !northWasActive) {
-      northWasActive = true;
-      triggerResonance();
-    } else if (motion.north <= 0.25) {
-      northWasActive = false;
-    }
-    if (mic.level !== lastLevel) {
-      if (mic.level === 3 && lastLevel < 3) synth.startBlowChord();
-      else if (mic.level < 3 && lastLevel === 3) synth.stopBlowChord();
+    let particleEnergy = 0;
+    let particleLevel = 0;
 
-      if (mic.level > lastLevel) {
-        if (mic.level < 3) triggerResonance();
-        if (mic.level === 1) {
-          particles.pulse("weak");
-        } else if (mic.level === 2) {
-          particles.pulse("medium");
-        } else if (mic.level === 3) {
-          particles.pulse("strong");
-        }
+    if (appMode === "guided") {
+      mic.update();
+      if (guidedRest.update(deltaSeconds)) finishGuidedRest();
+      if (appMode === "guided") {
+        particles.setTilt(0, 0, 0);
+        particles.setGuidedBreath(
+          guidedRest.breathAmount,
+          guidedRest.breathMotion,
+          guidedRest.guideStrength,
+          reducedMotion.matches,
+        );
+        if (guidedRest.acceptsBreath(mic.energy, mic.level)) triggerResonance();
       }
-      lastLevel = mic.level;
+    } else if (appMode === "freeplay") {
+      particles.clearGuidedBreath();
+      mic.update();
+      motion.update(deltaSeconds);
+      particles.setTilt(motion.tiltX, motion.tiltY, motion.north);
+      if (motion.north >= 0.65 && !northWasActive) {
+        northWasActive = true;
+        triggerResonance();
+      } else if (motion.north <= 0.25) {
+        northWasActive = false;
+      }
+      if (mic.level !== lastLevel) {
+        if (mic.level === 3 && lastLevel < 3) synth.startBlowChord();
+        else if (mic.level < 3 && lastLevel === 3) synth.stopBlowChord();
+
+        if (mic.level > lastLevel) {
+          if (mic.level < 3) triggerResonance();
+          if (mic.level === 1) {
+            particles.pulse("weak");
+          } else if (mic.level === 2) {
+            particles.pulse("medium");
+          } else if (mic.level === 3) {
+            particles.pulse("strong");
+          }
+        }
+        lastLevel = mic.level;
+      }
+      particleEnergy = mic.energy;
+      particleLevel = mic.level;
+    } else {
+      particles.setTilt(0, 0, 0);
+      particles.clearGuidedBreath();
     }
 
-    particles.update(deltaSeconds, elapsedSeconds, mic.energy, mic.level);
+    particles.update(deltaSeconds, elapsedSeconds, particleEnergy, particleLevel);
     if (adaptQuality(quality, rawDelta * 1000, field, particles) && field.enabled) {
       field.resize(particles.width, particles.height);
     }

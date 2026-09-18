@@ -48,6 +48,91 @@
         touch-action: none;
       }
 
+      .mode-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 3;
+        display: grid;
+        padding: max(24px, env(safe-area-inset-top)) 24px
+          max(24px, env(safe-area-inset-bottom));
+        place-items: center;
+        color: #dcf7ff;
+        background: rgb(0 15 42 / 38%);
+        font-family: system-ui, sans-serif;
+        text-align: center;
+        backdrop-filter: blur(3px);
+      }
+
+      .mode-overlay[hidden],
+      .mode-view[hidden],
+      .guided-exit[hidden] {
+        display: none;
+      }
+
+      .mode-card {
+        display: grid;
+        width: min(82vw, 22rem);
+        gap: 14px;
+        justify-items: center;
+      }
+
+      .mode-title,
+      .complete-message {
+        margin: 0 0 20px;
+        font-weight: 400;
+        letter-spacing: 0.12em;
+      }
+
+      .mode-title {
+        font-size: clamp(24px, 7vw, 38px);
+      }
+
+      .complete-message {
+        font-size: clamp(18px, 5vw, 26px);
+      }
+
+      .mode-action {
+        width: min(74vw, 18rem);
+        min-height: 48px;
+        padding: 12px 20px;
+        color: #dcf7ff;
+        background: rgb(4 33 70 / 56%);
+        border: 1px solid rgb(180 235 255 / 24%);
+        border-radius: 999px;
+        font: 15px/1.2 system-ui, sans-serif;
+        letter-spacing: 0.06em;
+        backdrop-filter: blur(8px);
+        cursor: pointer;
+      }
+
+      .mode-action-secondary {
+        color: rgb(210 243 255 / 78%);
+        background: rgb(0 20 50 / 28%);
+        border-color: rgb(180 235 255 / 12%);
+      }
+
+      .guided-exit {
+        position: fixed;
+        top: max(12px, env(safe-area-inset-top));
+        right: max(12px, env(safe-area-inset-right));
+        z-index: 2;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        color: rgb(210 243 255 / 58%);
+        background: rgb(0 20 50 / 24%);
+        border: 1px solid rgb(180 235 255 / 10%);
+        border-radius: 50%;
+        font: 22px/1 system-ui, sans-serif;
+      }
+
+      body.mode-landing .camera-button,
+      body.mode-guided .camera-button,
+      body.mode-complete .camera-button {
+        opacity: 0;
+        pointer-events: none;
+      }
+
       .camera-button {
         position: fixed;
         left: max(12px, env(safe-area-inset-left));
@@ -208,6 +293,9 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        .mode-overlay,
+        .mode-action,
+        .guided-exit,
         .camera-button,
         .volume-control,
         .volume-slider {
@@ -216,8 +304,33 @@
       }
     </style>
   </head>
-  <body>
+  <body class="mode-landing">
     <canvas id="scene" tabindex="0" aria-label="青い光の粒子"></canvas>
+    <div class="mode-overlay" id="mode-overlay">
+      <section class="mode-view mode-card" id="landing-view" aria-labelledby="mode-title">
+        <h1 class="mode-title" id="mode-title">OTO溜まり</h1>
+        <button class="mode-action" id="guided-start" type="button">3分休息</button>
+        <button class="mode-action mode-action-secondary" id="freeplay-start" type="button">
+          自由に遊ぶ
+        </button>
+      </section>
+      <section
+        class="mode-view mode-card"
+        id="complete-view"
+        aria-live="polite"
+        aria-labelledby="complete-message"
+        hidden
+      >
+        <p class="complete-message" id="complete-message">ひと息、おわり</p>
+        <button class="mode-action" id="complete-freeplay" type="button">余韻を続ける</button>
+        <button class="mode-action mode-action-secondary" id="guided-restart" type="button">
+          もう一度
+        </button>
+      </section>
+    </div>
+    <button class="guided-exit" id="guided-exit" type="button" aria-label="休息を終える" hidden>
+      ×
+    </button>
     <button class="camera-button" id="camera-button" type="button" aria-label="写真から粒子を作る">
       <span aria-hidden="true">◉</span>
     </button>
