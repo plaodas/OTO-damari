@@ -77,16 +77,19 @@ void main() {
   }
 
   if (spread > 0.02) {
-    float waveA = sin(u_time * mix(0.72, 0.32, idle) + a_phase + pos.y * mix(6.0, 2.8, idle));
-    float waveB = cos(u_time * mix(0.51, 0.24, idle) - a_phase * 1.7 + pos.x * mix(5.0, 2.3, idle));
+    float waveA = sin(u_time * mix(0.72, 0.16, idle) + a_phase + pos.y * mix(6.0, 1.4, idle));
+    float waveB = cos(u_time * mix(0.51, 0.12, idle) - a_phase * 1.7 + pos.x * mix(5.0, 1.2, idle));
+    float swellA = sin(u_time * 0.11 + a_phase * 2.3 + a_home.x * 4.0);
+    float swellB = cos(u_time * 0.087 - a_phase * 1.6 + a_home.y * 3.2);
     float homePull = mix(
       ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
-      ambient > 0.5 ? 0.4 : 0.32,
+      ambient > 0.5 ? 0.22 : 0.16,
       idle
     ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88);
-    vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.015, idle);
+    vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.01, idle);
+    wander += vec2(swellA, swellB) * idle * 0.018;
     float freedom = 1.0 - photoHold * 0.88;
-    vel += (wander - vel) * min(1.0, mix(1.8, 0.75, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8);
+    vel += (wander - vel) * min(1.0, mix(1.8, 0.9, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8);
     vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
@@ -126,7 +129,7 @@ void main() {
     vel += jolt * u_shake * 0.28;
   }
 
-  float damping = mix(mix(0.965, 0.954, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
+  float damping = mix(mix(0.965, 0.96, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
   vel *= pow(damping, u_dt * 60.0);
   pos += vel * u_dt;
 
