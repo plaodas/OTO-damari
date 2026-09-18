@@ -22,7 +22,8 @@ import { estimatePhotoField } from "./photo-depth.js";
 
 const GRAIN_VOICES = 3;
 const SOLFEGGIO_FREQUENCIES = [174, 285, 396, 417, 528, 639, 741, 852, 963];
-const RESONANCE_COOLDOWN_MS = 4000;
+const RESONANCE_VOICE_LIMIT = 5;
+const BLOW_CHORD_FREQUENCIES = [174, 285, 963];
 
 const LEVEL_ENTER = [0, 0.012, 0.032, 0.07];
 const LEVEL_EXIT = [0, 0.008, 0.024, 0.05];
@@ -623,8 +624,8 @@ class HybridSynth {
     this.grainAhead = 0;
     this.grainVoice = 0;
     this.resonanceIndex = 0;
-    this.lastResonanceAt = -Infinity;
-    this.resonanceVoice = null;
+    this.resonanceVoices = [];
+    this.blowChord = null;
   }
 
   unlock() {
@@ -704,37 +705,32 @@ class HybridSynth {
     oscillator.stop(startAt + decay + 0.03);
   }
 
+  fadeResonanceVoice(voice, startAt, release = 0.08) {
+    voice.gain.gain.cancelScheduledValues(startAt);
+    voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), startAt);
+    voice.gain.gain.exponentialRampToValueAtTime(0.0001, startAt + release);
+    try {
+      voice.oscillator.stop(startAt + release + 0.02);
+    } catch {
+      // The resonance may already have ended.
+    }
+  }
+
   triggerResonance() {
     const context = this.unlock();
-    const nowMs = performance.now();
-    if (!context || !this.master || nowMs - this.lastResonanceAt < RESONANCE_COOLDOWN_MS) {
-      return false;
-    }
+    if (!context || !this.master) return false;
 
-    this.lastResonanceAt = nowMs;
     const frequency = SOLFEGGIO_FREQUENCIES[this.resonanceIndex];
     this.resonanceIndex = (this.resonanceIndex + 1) % SOLFEGGIO_FREQUENCIES.length;
 
     const startAt = context.currentTime;
-    if (this.resonanceVoice) {
-      const previous = this.resonanceVoice;
-      previous.gain.gain.cancelScheduledValues(startAt);
-      previous.gain.gain.setValueAtTime(
-        Math.max(0.0001, previous.gain.gain.value),
-        startAt,
-      );
-      previous.gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.08);
-      try {
-        previous.oscillator.stop(startAt + 0.1);
-      } catch {
-        // The previous resonance may already have ended.
-      }
-      this.resonanceVoice = null;
+    while (this.resonanceVoices.length >= RESONANCE_VOICE_LIMIT) {
+      this.fadeResonanceVoice(this.resonanceVoices.shift(), startAt);
     }
 
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    const peak = frequency <= 285 ? 0.024 : 0.017;
+    const peak = (frequency <= 285 ? 0.02 : 0.014) / Math.sqrt(this.resonanceVoices.length + 1);
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(frequency, startAt);
     gain.gain.setValueAtTime(0.0001, startAt);
@@ -746,13 +742,68 @@ class HybridSynth {
     oscillator.stop(startAt + 1.85);
 
     const voice = { oscillator, gain };
-    this.resonanceVoice = voice;
+    this.resonanceVoices.push(voice);
     oscillator.addEventListener("ended", () => {
       oscillator.disconnect();
       gain.disconnect();
-      if (this.resonanceVoice === voice) this.resonanceVoice = null;
+      this.resonanceVoices = this.resonanceVoices.filter((item) => item !== voice);
     });
     return true;
+  }
+
+  startBlowChord() {
+    const context = this.unlock();
+    if (!context || !this.compressor || this.blowChord) return;
+
+    const startAt = context.currentTime;
+    const mix = context.createGain();
+    mix.gain.setValueAtTime(0.0001, startAt);
+    mix.gain.exponentialRampToValueAtTime(1, startAt + 0.28);
+    mix.connect(this.compressor);
+
+    const voices = BLOW_CHORD_FREQUENCIES.map((frequency) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, startAt);
+      gain.gain.value = frequency <= 174 ? 0.026 : frequency <= 285 ? 0.016 : 0.012;
+      oscillator.connect(gain);
+      gain.connect(mix);
+      oscillator.start(startAt);
+      return { oscillator, gain };
+    });
+
+    this.blowChord = { mix, voices };
+  }
+
+  stopBlowChord() {
+    if (!this.blowChord || !this.context) return;
+
+    const { mix, voices } = this.blowChord;
+    const now = this.context.currentTime;
+    mix.gain.cancelScheduledValues(now);
+    mix.gain.setValueAtTime(Math.max(0.0001, mix.gain.value), now);
+    mix.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    for (const voice of voices) {
+      try {
+        voice.oscillator.stop(now + 0.42);
+      } catch {
+        // already stopped
+      }
+    }
+    this.blowChord = null;
+
+    window.setTimeout(() => {
+      mix.disconnect();
+      for (const voice of voices) {
+        try {
+          voice.oscillator.disconnect();
+          voice.gain.disconnect();
+        } catch {
+          // already disconnected
+        }
+      }
+    }, 480);
   }
 
   playKarplus(startAt, frequency, peak, duration, options = {}) {
@@ -1269,7 +1320,6 @@ async function start() {
     const shouldResonate = !pointer.swiping && event?.type !== "pointercancel";
     if (pointer.swiping) {
       particles.releaseSwipe();
-      synth.stopShimmer();
     }
     pointer = null;
     if (shouldResonate) triggerResonance();
@@ -1304,9 +1354,7 @@ async function start() {
       pointer.swiping = true;
       particles.beginSwipe(pointer.startX, pointer.startY, point.x, point.y);
       synth.unlock();
-      synth.playKirari();
       triggerResonance();
-      synth.startShimmer();
     }
     if (pointer.swiping) particles.steerSwipe(point.x, point.y);
   });
@@ -1339,8 +1387,11 @@ async function start() {
       northWasActive = false;
     }
     if (mic.level !== lastLevel) {
+      if (mic.level === 3 && lastLevel < 3) synth.startBlowChord();
+      else if (mic.level < 3 && lastLevel === 3) synth.stopBlowChord();
+
       if (mic.level > lastLevel) {
-        triggerResonance();
+        if (mic.level < 3) triggerResonance();
         if (mic.level === 1) {
           particles.pulse("weak");
         } else if (mic.level === 2) {
@@ -1351,7 +1402,6 @@ async function start() {
       }
       lastLevel = mic.level;
     }
-    synth.scheduleGrains();
 
     particles.update(deltaSeconds, elapsedSeconds, mic.energy, mic.level);
     if (adaptQuality(quality, rawDelta * 1000, field, particles) && field.enabled) {
