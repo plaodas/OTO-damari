@@ -194,12 +194,19 @@ class MotionInput {
     this.heading = null;
     this.sensorHeading = null;
     this.headingSensor = null;
+    this.magnetometer = null;
+    this.accelSensor = null;
+    this.gravityRaw = null;
+    this.magRaw = null;
     this.north = 0;
     this.onShake = null;
     this.android = /Android/i.test(navigator.userAgent);
   }
 
   start() {
+    this.bind();
+    this.startHeadingSensor();
+    this.startCompassSensors();
     if (this.startPromise) return this.startPromise;
     this.startPromise = this.enable();
     return this.startPromise;
@@ -208,7 +215,7 @@ class MotionInput {
   async enable() {
     const motion = window.DeviceMotionEvent;
     const orientation = window.DeviceOrientationEvent;
-    if (!motion && !orientation) return;
+    if (!motion && !orientation && typeof window.AbsoluteOrientationSensor !== "function") return;
 
     try {
       if (typeof motion?.requestPermission === "function") {
@@ -220,19 +227,13 @@ class MotionInput {
       if (typeof orientation?.requestPermission === "function") {
         await orientation.requestPermission().catch(() => "denied");
       }
-      if (navigator.permissions?.query) {
-        await Promise.allSettled(
-          ["accelerometer", "gyroscope", "magnetometer"].map((name) =>
-            navigator.permissions.query({ name }),
-          ),
-        );
-      }
     } catch (error) {
       console.warn("モーションセンサーの許可を取得できませんでした。", error);
     }
 
     this.bind();
     this.startHeadingSensor();
+    this.startCompassSensors();
   }
 
   bind() {
@@ -246,16 +247,17 @@ class MotionInput {
   }
 
   startHeadingSensor() {
+    if (this.headingSensor) return;
     const Sensor = window.AbsoluteOrientationSensor;
     if (typeof Sensor !== "function") return;
-    for (const referenceFrame of ["screen", "device"]) {
+    for (const referenceFrame of ["device", "screen"]) {
       try {
         const sensor = new Sensor({ frequency: 20, referenceFrame });
         sensor.addEventListener("reading", () => {
           const heading = this.headingFromQuaternion(sensor.quaternion);
           if (heading == null) return;
           this.sensorHeading =
-            referenceFrame === "device" ? (heading + this.screenAngle() + 360) % 360 : heading;
+            referenceFrame === "screen" ? heading : (heading + this.screenAngle() + 360) % 360;
         });
         sensor.addEventListener("error", () => {
           try {
@@ -274,20 +276,119 @@ class MotionInput {
     }
   }
 
-  headingFromQuaternion(quaternion) {
-    if (!quaternion || quaternion.length < 4) return null;
-    const [qx, qy, qz, qw] = quaternion;
-    const vx = 0;
-    const vy = 0;
-    const vz = -1;
+  startCompassSensors() {
+    if (this.magnetometer) return;
+    const Mag = window.Magnetometer;
+    const Accel = window.Accelerometer;
+    if (typeof Mag !== "function") return;
+    try {
+      const magnetometer = new Mag({ frequency: 20, referenceFrame: "device" });
+      magnetometer.addEventListener("reading", () => {
+        this.magRaw = { x: magnetometer.x, y: magnetometer.y, z: magnetometer.z };
+        this.updateMagHeading();
+      });
+      magnetometer.addEventListener("error", () => {
+        try {
+          magnetometer.stop();
+        } catch {
+          // Already stopped.
+        }
+        if (this.magnetometer === magnetometer) this.magnetometer = null;
+      });
+      magnetometer.start();
+      this.magnetometer = magnetometer;
+    } catch {
+      this.magnetometer = null;
+      return;
+    }
+    if (typeof Accel !== "function") return;
+    try {
+      const accel = new Accel({ frequency: 20, referenceFrame: "device" });
+      accel.addEventListener("reading", () => {
+        this.gravityRaw = { x: accel.x, y: accel.y, z: accel.z };
+        this.updateMagHeading();
+      });
+      accel.addEventListener("error", () => {
+        try {
+          accel.stop();
+        } catch {
+          // Already stopped.
+        }
+      });
+      accel.start();
+      this.accelSensor = accel;
+    } catch {
+      this.accelSensor = null;
+    }
+  }
+
+  updateMagHeading() {
+    if (this.sensorHeading != null) return;
+    const g = this.gravityRaw;
+    const m = this.magRaw;
+    if (!g || !m) return;
+    const heading = this.headingFromAccelMag(g.x, g.y, g.z, m.x, m.y, m.z);
+    if (heading != null) this.heading = (heading + this.screenAngle() + 360) % 360;
+  }
+
+  headingFromAccelMag(ax, ay, az, mx, my, mz) {
+    const g = Math.hypot(ax, ay, az);
+    if (g < 1) return null;
+    ax /= g;
+    ay /= g;
+    az /= g;
+    let hx = my * az - mz * ay;
+    let hy = mz * ax - mx * az;
+    let hz = mx * ay - my * ax;
+    const east = Math.hypot(hx, hy, hz);
+    if (east < 0.05) return null;
+    hx /= east;
+    hy /= east;
+    hz /= east;
+    const nx = ay * hz - az * hy;
+    const ny = az * hx - ax * hz;
+    const nz = ax * hy - ay * hx;
+    return (Math.atan2(-hz, -nz) * (180 / Math.PI) + 360) % 360;
+  }
+
+  rotateVec(q, v) {
+    const [qx, qy, qz, qw] = q;
+    const [vx, vy, vz] = v;
     const tx = 2 * (qy * vz - qz * vy);
     const ty = 2 * (qz * vx - qx * vz);
     const tz = 2 * (qx * vy - qy * vx);
-    const east = vx + qw * tx + (qy * tz - qz * ty);
-    const north = vy + qw * ty + (qz * tx - qx * tz);
-    if (!Number.isFinite(east) || !Number.isFinite(north)) return null;
-    if (Math.hypot(east, north) < 0.12) return null;
-    return (Math.atan2(east, north) * (180 / Math.PI) + 360) % 360;
+    return [
+      vx + qw * tx + (qy * tz - qz * ty),
+      vy + qw * ty + (qz * tx - qx * tz),
+      vz + qw * tz + (qx * ty - qy * tx),
+    ];
+  }
+
+  headingFromDir(dir) {
+    const horiz = Math.hypot(dir[0], dir[1]);
+    if (horiz < 0.08) return null;
+    return (Math.atan2(dir[0], dir[1]) * (180 / Math.PI) + 360) % 360;
+  }
+
+  headingFromQuaternion(quaternion) {
+    if (!quaternion || quaternion.length < 4) return null;
+    const q = [quaternion[0], quaternion[1], quaternion[2], quaternion[3]];
+    const qInv = [-q[0], -q[1], -q[2], q[3]];
+    let best = null;
+    let bestHoriz = 0;
+    for (const rot of [q, qInv]) {
+      const back = this.rotateVec(rot, [0, 0, -1]);
+      const top = this.rotateVec(rot, [0, 1, 0]);
+      const backHoriz = Math.hypot(back[0], back[1]);
+      const facing = backHoriz >= 0.35 ? back : top;
+      const horiz = Math.hypot(facing[0], facing[1]);
+      if (horiz <= bestHoriz) continue;
+      const heading = this.headingFromDir(facing);
+      if (heading == null) continue;
+      best = heading;
+      bestHoriz = horiz;
+    }
+    return best;
   }
 
   compassFromEuler(alpha, beta, gamma) {
@@ -340,8 +441,8 @@ class MotionInput {
 
   northAlignment(heading) {
     const delta = Math.min(Math.abs(heading), 360 - Math.abs(heading));
-    if (delta >= 22) return 0;
-    return 0.5 * (1 + Math.cos((Math.PI * delta) / 22));
+    if (delta >= 32) return 0;
+    return 0.5 * (1 + Math.cos((Math.PI * delta) / 32));
   }
 
   setRawTilt(x, y) {
@@ -357,6 +458,10 @@ class MotionInput {
 
   handleMotion = (event) => {
     const gravity = event.accelerationIncludingGravity;
+    if (gravity && Number.isFinite(gravity.x) && Number.isFinite(gravity.y) && Number.isFinite(gravity.z)) {
+      this.gravityRaw = { x: gravity.x, y: gravity.y, z: gravity.z };
+      this.updateMagHeading();
+    }
     if (!this.hasOrientation && gravity && Number.isFinite(gravity.x) && Number.isFinite(gravity.y)) {
       const mag = Math.hypot(gravity.x, gravity.y, gravity.z || 0);
       if (mag > 6) {
