@@ -24,6 +24,20 @@ const LEVEL_ENTER = [0, 0.012, 0.032, 0.07];
 const LEVEL_EXIT = [0, 0.008, 0.024, 0.05];
 
 const canvas = document.querySelector("#scene");
+const volumeControl = document.querySelector("#volume-control");
+const volumeButton = document.querySelector("#volume-button");
+const volumeSlider = document.querySelector("#volume-slider");
+const volumeIcon = document.querySelector("#volume-icon");
+
+function readStoredVolume() {
+  try {
+    const stored = Number.parseFloat(localStorage.getItem("oto-volume"));
+    if (Number.isFinite(stored)) return Math.max(0, Math.min(1, stored));
+  } catch {
+    // Storage may be unavailable in private browsing.
+  }
+  return 0.85;
+}
 
 class MicInput {
   constructor() {
@@ -114,6 +128,7 @@ class HybridSynth {
   constructor() {
     this.context = null;
     this.master = null;
+    this.volume = readStoredVolume();
     this.highpass = null;
     this.compressor = null;
     this.noiseBuffer = null;
@@ -129,7 +144,7 @@ class HybridSynth {
 
       this.context = new AudioContextClass();
       this.master = this.context.createGain();
-      this.master.gain.value = 0.72;
+      this.master.gain.value = this.volume * this.volume;
 
       this.highpass = this.context.createBiquadFilter();
       this.highpass.type = "highpass";
@@ -153,6 +168,17 @@ class HybridSynth {
       this.context.resume().catch(() => {});
     }
     return this.context;
+  }
+
+  setVolume(value) {
+    this.volume = Math.max(0, Math.min(1, Number(value) || 0));
+    if (this.master && this.context) {
+      this.master.gain.setTargetAtTime(
+        this.volume * this.volume,
+        this.context.currentTime,
+        0.02,
+      );
+    }
   }
 
   createNoiseBuffer() {
@@ -456,6 +482,47 @@ async function start() {
   const mic = new MicInput();
   const synth = new HybridSynth();
   let lastLevel = 0;
+  let volumeCloseTimer = 0;
+
+  function updateVolumeControl() {
+    volumeSlider.value = String(synth.volume);
+    volumeIcon.textContent = synth.volume < 0.01 ? "🔇" : synth.volume < 0.5 ? "🔉" : "🔊";
+    volumeButton.setAttribute("aria-label", `音量を調整、現在${Math.round(synth.volume * 100)}%`);
+  }
+
+  function setVolumeControlOpen(open) {
+    volumeControl.classList.toggle("is-open", open);
+    volumeButton.setAttribute("aria-expanded", String(open));
+  }
+
+  function scheduleVolumeControlClose() {
+    window.clearTimeout(volumeCloseTimer);
+    volumeCloseTimer = window.setTimeout(() => {
+      setVolumeControlOpen(false);
+    }, 2800);
+  }
+
+  volumeControl.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+  volumeButton.addEventListener("click", () => {
+    const willOpen = !volumeControl.classList.contains("is-open");
+    setVolumeControlOpen(willOpen);
+    if (willOpen) scheduleVolumeControlClose();
+    else window.clearTimeout(volumeCloseTimer);
+  });
+  volumeSlider.addEventListener("input", () => {
+    synth.setVolume(volumeSlider.value);
+    updateVolumeControl();
+    try {
+      localStorage.setItem("oto-volume", String(synth.volume));
+    } catch {
+      // Keep the current session volume when storage is unavailable.
+    }
+    scheduleVolumeControlClose();
+  });
+  volumeSlider.addEventListener("change", scheduleVolumeControlClose);
+  updateVolumeControl();
 
   window.__otoSetLevel = (level) => {
     mic.debugLevel = level == null ? null : Math.max(0, Math.min(3, Number(level) || 0));
