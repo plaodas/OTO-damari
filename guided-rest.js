@@ -3,7 +3,8 @@ const BREATHE_SECONDS = 120;
 const RELEASE_SECONDS = 30;
 const CYCLE_SECONDS = 10;
 const EXPAND_SECONDS = 4;
-const MIC_GATE_MS = 2200;
+const BREATH_ENTER = 0.08;
+const BREATH_HOLD = 0.045;
 
 function smoothstep(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -17,8 +18,7 @@ export class GuidedRestSession {
     this.phase = "idle";
     this.active = false;
     this.paused = false;
-    this.respondedCycle = -1;
-    this.micGateUntil = 0;
+    this.breathing = false;
   }
 
   start() {
@@ -26,15 +26,14 @@ export class GuidedRestSession {
     this.phase = "settle";
     this.active = true;
     this.paused = false;
-    this.respondedCycle = -1;
-    this.micGateUntil = 0;
+    this.breathing = false;
   }
 
   stop() {
     this.active = false;
     this.paused = false;
     this.phase = "idle";
-    this.micGateUntil = 0;
+    this.breathing = false;
   }
 
   setPaused(paused) {
@@ -93,21 +92,27 @@ export class GuidedRestSession {
     return Math.max(0, Math.min(1, this.elapsed / this.duration));
   }
 
-  acceptsBreath(energy, level, nowMs = performance.now()) {
-    if (
-      !this.active ||
-      this.paused ||
-      this.phase !== "breathe" ||
-      this.cycleTime < EXPAND_SECONDS + 0.45 ||
-      nowMs < this.micGateUntil ||
-      this.respondedCycle === this.cycleIndex
-    ) {
-      return false;
+  isExhaleWindow() {
+    return this.phase === "breathe" && this.cycleTime >= EXPAND_SECONDS + 0.35;
+  }
+
+  updateBreath(energy, level) {
+    const strong = level >= 1 || energy >= BREATH_ENTER;
+    const present = level >= 1 || energy >= BREATH_HOLD;
+    const canStart =
+      this.active && !this.paused && this.isExhaleWindow() && strong && !this.breathing;
+
+    if (canStart) {
+      this.breathing = true;
+      return { started: true, holding: true, stopped: false };
     }
 
-    if (level < 1 && energy < 0.08) return false;
-    this.respondedCycle = this.cycleIndex;
-    this.micGateUntil = nowMs + MIC_GATE_MS;
-    return true;
+    if (this.breathing && this.active && !this.paused && present) {
+      return { started: false, holding: true, stopped: false };
+    }
+
+    const stopped = this.breathing;
+    this.breathing = false;
+    return { started: false, holding: false, stopped };
   }
 }

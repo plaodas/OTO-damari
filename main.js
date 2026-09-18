@@ -639,6 +639,7 @@ class HybridSynth {
     this.resonanceIndex = 0;
     this.resonanceVoices = [];
     this.blowChord = null;
+    this.guidedTone = null;
   }
 
   unlock() {
@@ -770,6 +771,50 @@ class HybridSynth {
       this.resonanceVoices = this.resonanceVoices.filter((item) => item !== voice);
     });
     return true;
+  }
+
+  startGuidedTone() {
+    const context = this.unlock();
+    if (!context || !this.compressor || this.guidedTone) return false;
+
+    const frequency = SOLFEGGIO_FREQUENCIES[this.resonanceIndex];
+    this.resonanceIndex = (this.resonanceIndex + 1) % SOLFEGGIO_FREQUENCIES.length;
+    const startAt = context.currentTime;
+    const mix = context.createGain();
+    const oscillator = context.createOscillator();
+    mix.gain.setValueAtTime(0.0001, startAt);
+    mix.gain.exponentialRampToValueAtTime(frequency <= 285 ? 0.022 : 0.016, startAt + 0.22);
+    mix.connect(this.compressor);
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, startAt);
+    oscillator.connect(mix);
+    oscillator.start(startAt);
+    this.guidedTone = { mix, oscillator };
+    return true;
+  }
+
+  stopGuidedTone() {
+    if (!this.guidedTone || !this.context) return;
+
+    const { mix, oscillator } = this.guidedTone;
+    const now = this.context.currentTime;
+    mix.gain.cancelScheduledValues(now);
+    mix.gain.setValueAtTime(Math.max(0.0001, mix.gain.value), now);
+    mix.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+    try {
+      oscillator.stop(now + 0.38);
+    } catch {
+      // already stopped
+    }
+    this.guidedTone = null;
+    window.setTimeout(() => {
+      try {
+        oscillator.disconnect();
+        mix.disconnect();
+      } catch {
+        // already disconnected
+      }
+    }, 420);
   }
 
   startBlowChord() {
@@ -1242,6 +1287,7 @@ async function start() {
     completeView.hidden = true;
     guidedExit.hidden = false;
     synth.stopBlowChord();
+    synth.stopGuidedTone();
     synth.fadeAllResonances();
     particles.beginGuidedRest();
     guidedRest.start();
@@ -1255,6 +1301,7 @@ async function start() {
     guidedRest.stop();
     particles.clearGuidedBreath();
     synth.stopBlowChord();
+    synth.stopGuidedTone();
     setAppMode("freeplay");
     modeOverlay.hidden = true;
     guidedExit.hidden = true;
@@ -1272,6 +1319,7 @@ async function start() {
     guidedRest.stop();
     particles.clearGuidedBreath();
     synth.stopBlowChord();
+    synth.stopGuidedTone();
     synth.stopShimmer();
     synth.fadeAllResonances(0.5);
     mic.debugLevel = null;
@@ -1381,6 +1429,7 @@ async function start() {
     guidedRest.stop();
     particles.clearGuidedBreath();
     synth.stopBlowChord();
+    synth.stopGuidedTone();
     synth.stopShimmer();
     synth.fadeAllResonances(0.2);
     mic.disconnect();
@@ -1502,7 +1551,12 @@ async function start() {
           guidedRest.guideStrength,
           reducedMotion.matches,
         );
-        if (guidedRest.acceptsBreath(mic.energy, mic.level)) triggerResonance();
+        const breath = guidedRest.updateBreath(mic.energy, mic.level);
+        if (breath.started) {
+          if (synth.startGuidedTone()) particles.pulseResonance();
+        } else if (breath.stopped) {
+          synth.stopGuidedTone();
+        }
       }
     } else if (appMode === "freeplay") {
       particles.clearGuidedBreath();
