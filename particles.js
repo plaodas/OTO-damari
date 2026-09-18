@@ -23,6 +23,8 @@ export class ParticleField {
     this.guideAmount = 0;
     this.guideMotion = 0;
     this.guideStrength = 0;
+    this.breathGlow = 0;
+    this.breathGlowTarget = 0;
     this.waterSheen = 0;
     this.flowBoost = 0;
     this.flowSpeed = 5;
@@ -298,6 +300,8 @@ export class ParticleField {
     this.tiltX = 0;
     this.tiltY = 0;
     this.north = 0;
+    this.breathGlow = 0;
+    this.breathGlowTarget = 0;
   }
 
   setGuidedBreath(amount, motion, strength, reducedMotion = false) {
@@ -306,10 +310,15 @@ export class ParticleField {
     this.guideStrength = Math.max(0, Math.min(1, strength));
   }
 
+  setBreathGlow(holding) {
+    this.breathGlowTarget = holding ? 1 : 0;
+  }
+
   clearGuidedBreath() {
     this.guideAmount = 0;
     this.guideMotion = 0;
     this.guideStrength = 0;
+    this.breathGlowTarget = 0;
   }
 
   setAxis(dx, dy) {
@@ -457,8 +466,16 @@ export class ParticleField {
     this.resonanceAmount =
       this.resonanceAge < 1.8 ? Math.sin(Math.PI * resonancePhase) : 0;
     this.glowPulse *= Math.pow(0.92, frames);
+    this.breathGlow +=
+      (this.breathGlowTarget - this.breathGlow) *
+      Math.min(1, (this.breathGlowTarget > this.breathGlow ? 0.28 : 0.08) * frames);
     const bloomingNow = blowLevel === 3 || this.swipeActive;
-    const emitTarget = Math.max(this.glowPulse, bloomingNow ? 1 : 0, blowLevel >= 2 ? 0.4 : 0);
+    const emitTarget = Math.max(
+      this.glowPulse,
+      bloomingNow ? 1 : 0,
+      blowLevel >= 2 ? 0.4 : 0,
+      this.breathGlow,
+    );
     this.glowFade = Math.max(emitTarget, this.glowFade * Math.pow(0.96, frames));
     this.sizePulse *= Math.pow(0.94, frames);
     this.waterSheen *= Math.pow(0.96, frames);
@@ -589,8 +606,8 @@ export class ParticleField {
   draw() {
     const gl = this.gl;
     const blooming = this.blowLevel === 3 || this.swipeActive ? 1 : 0;
-    const guideSize = this.guideStrength * (0.08 + this.guideAmount * 0.22);
-    const guideGlow = this.guideStrength * (0.05 + this.guideAmount * 0.14);
+    const guideSize = this.guideStrength * (0.08 + this.guideAmount * 0.22) + this.breathGlow * 0.55;
+    const guideGlow = this.guideStrength * (0.05 + this.guideAmount * 0.14) + this.breathGlow * 0.95;
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.activeTexture(gl.TEXTURE0);

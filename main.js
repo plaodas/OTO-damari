@@ -1552,6 +1552,7 @@ async function start() {
           reducedMotion.matches,
         );
         const breath = guidedRest.updateBreath(mic.energy, mic.level);
+        particles.setBreathGlow(breath.holding);
         if (breath.started) {
           if (synth.startGuidedTone()) particles.pulseResonance();
         } else if (breath.stopped) {
