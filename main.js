@@ -495,6 +495,10 @@ class MotionInput {
     if (heading != null) this.heading = heading;
     if (this.gotRelativeOrientation) return;
     if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+    if (!this.hasOrientation) {
+      this.restReady = false;
+      this.armedAt = performance.now() + 220;
+    }
     this.hasOrientation = true;
     const mapped = this.rotateToScreen(event.gamma / 32, (event.beta - 90) / 32);
     this.setRawTilt(mapped.x, mapped.y);
@@ -504,6 +508,10 @@ class MotionInput {
     const heading = this.readHeading(event);
     if (heading != null) this.heading = heading;
     if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+    if (!this.hasOrientation) {
+      this.restReady = false;
+      this.armedAt = performance.now() + 220;
+    }
     this.gotRelativeOrientation = true;
     this.hasOrientation = true;
     const mapped = this.rotateToScreen(event.gamma / 32, (event.beta - 90) / 32);
@@ -522,19 +530,24 @@ class MotionInput {
     }
 
     const clamp = (value) => Math.max(-1, Math.min(1, value));
-    const x = clamp(this.gravityX - this.restX);
-    const y = clamp(this.gravityY - this.restY);
-    const mag = Math.hypot(x, y);
-    if (mag < 0.16) {
-      this.restX += (this.gravityX - this.restX) * 0.05;
-      this.restY += (this.gravityY - this.restY) * 0.05;
+    const dx = clamp(this.gravityX - this.restX);
+    const dy = clamp(this.gravityY - this.restY);
+    const mag = Math.hypot(dx, dy);
+    const dead = 0.26;
+
+    if (mag < dead) {
+      this.restX += (this.gravityX - this.restX) * 0.12;
+      this.restY += (this.gravityY - this.restY) * 0.12;
+      this.tiltX += (0 - this.tiltX) * 0.28;
+      this.tiltY += (0 - this.tiltY) * 0.28;
+      return;
     }
 
-    const nx = clamp(this.gravityX - this.restX);
-    const ny = clamp(this.gravityY - this.restY);
-    const dead = 0.1;
-    this.tiltX += ((Math.abs(nx) < dead ? 0 : nx) - this.tiltX) * 0.22;
-    this.tiltY += ((Math.abs(ny) < dead ? 0 : ny) - this.tiltY) * 0.22;
+    const gain = (mag - dead) / (1 - dead);
+    const tx = (dx / mag) * gain;
+    const ty = (dy / mag) * gain;
+    this.tiltX += (tx - this.tiltX) * 0.22;
+    this.tiltY += (ty - this.tiltY) * 0.22;
   }
 }
 
