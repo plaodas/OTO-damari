@@ -360,6 +360,7 @@ export class ParticleField {
       gl.UNSIGNED_BYTE,
       pixels,
     );
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     gl.activeTexture(gl.TEXTURE0);
     this.photoAmount = 0;
     this.photoTarget = 1;

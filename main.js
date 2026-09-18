@@ -727,6 +727,50 @@ async function start() {
 
   let cameraStream = null;
   let cameraRequestId = 0;
+  let glPauseCount = 0;
+
+  function pauseGl() {
+    glPauseCount += 1;
+  }
+
+  function resumeGl() {
+    glPauseCount = Math.max(0, glPauseCount - 1);
+  }
+
+  function waitForEvent(target, eventName, timeoutMs) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        target.removeEventListener(eventName, onEvent);
+        resolve();
+      }, timeoutMs);
+      const onEvent = () => {
+        clearTimeout(timer);
+        target.removeEventListener(eventName, onEvent);
+        resolve();
+      };
+      target.addEventListener(eventName, onEvent);
+    });
+  }
+
+  async function waitForCameraFrame(video) {
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA || video.videoWidth < 2) {
+      await waitForEvent(video, "loadedmetadata", 1500);
+    }
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      await waitForEvent(video, "loadeddata", 1500);
+    }
+    if (typeof video.requestVideoFrameCallback === "function") {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 400);
+        video.requestVideoFrameCallback(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
 
   function stopCamera() {
     cameraRequestId += 1;
@@ -736,6 +780,11 @@ async function start() {
     cameraStream = null;
     cameraPreview.pause();
     cameraPreview.srcObject = null;
+    try {
+      cameraPreview.load();
+    } catch {
+      // Some browsers throw if load() is called without a source.
+    }
     cameraPanel.hidden = true;
     cameraShutter.disabled = true;
     const context = synth.unlock();
@@ -754,6 +803,7 @@ async function start() {
     cameraPanel.hidden = false;
     cameraShutter.disabled = true;
     cameraMessage.textContent = "奥行きモデルを準備しています…";
+    pauseGl();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -770,6 +820,8 @@ async function start() {
       cameraStream = stream;
       cameraPreview.srcObject = cameraStream;
       await cameraPreview.play();
+      await waitForCameraFrame(cameraPreview);
+      if (requestId !== cameraRequestId) return;
       const { photoModelStatus, warmupPhotoModels } = await import("./photo-ml.js");
       await warmupPhotoModels();
       if (requestId !== cameraRequestId) return;
@@ -782,6 +834,8 @@ async function start() {
       if (requestId !== cameraRequestId) return;
       console.warn("カメラを開始できませんでした。", error);
       cameraMessage.textContent = "カメラを開始できませんでした";
+    } finally {
+      resumeGl();
     }
   }
 
@@ -792,9 +846,11 @@ async function start() {
     stopCamera();
   });
   cameraShutter.addEventListener("click", async () => {
-    if (!cameraStream || cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    if (!cameraStream || cameraPreview.videoWidth < 2) return;
+    if (cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
     cameraShutter.disabled = true;
     cameraMessage.textContent = "奥行きを読み取っています…";
+    pauseGl();
     try {
       const fieldData = await estimatePhotoField(
         cameraPreview,
@@ -803,6 +859,7 @@ async function start() {
         particles.count,
         false,
       );
+      restoreViewport();
       particles.setPhotoField(fieldData);
       synth.unlock();
       synth.playKirari();
@@ -811,6 +868,8 @@ async function start() {
       console.warn("写真を解析できませんでした。", error);
       cameraMessage.textContent = "写真を解析できませんでした";
       cameraShutter.disabled = false;
+    } finally {
+      resumeGl();
     }
   });
   window.addEventListener("pagehide", stopCamera);
@@ -902,6 +961,11 @@ async function start() {
   let previousTime = performance.now();
   const startedAt = previousTime;
   function frame(now) {
+    if (glPauseCount > 0) {
+      previousTime = now;
+      requestAnimationFrame(frame);
+      return;
+    }
     const rawDelta = (now - previousTime) / 1000;
     const deltaSeconds = Math.min(rawDelta, 0.033);
     const elapsedSeconds = (now - startedAt) / 1000;

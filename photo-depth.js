@@ -481,6 +481,31 @@ function extractContour(luminance, width, height) {
   return collectContour(fallback, nms, width, height);
 }
 
+function waitSourceFrame(source) {
+  return new Promise((resolve) => {
+    if (typeof source.requestVideoFrameCallback === "function") {
+      const timer = setTimeout(resolve, 320);
+      source.requestVideoFrameCallback(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+      return;
+    }
+    setTimeout(resolve, 80);
+  });
+}
+
+function luminanceRange(luminance) {
+  let min = 1;
+  let max = 0;
+  for (let i = 0; i < luminance.length; i += 1) {
+    const value = luminance[i];
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  return max - min;
+}
+
 function captureCoverCanvas(source, viewportWidth, viewportHeight, mirror = false) {
   const aspect = Math.max(0.5, Math.min(2, viewportWidth / Math.max(1, viewportHeight)));
   const width = aspect >= 1 ? MAX_DIMENSION : Math.max(160, Math.round(MAX_DIMENSION * aspect));
@@ -492,6 +517,11 @@ function captureCoverCanvas(source, viewportWidth, viewportHeight, mirror = fals
 
   const sourceWidth = source.videoWidth || source.naturalWidth || source.width;
   const sourceHeight = source.videoHeight || source.naturalHeight || source.height;
+  if (sourceWidth < 2 || sourceHeight < 2) {
+    context.fillStyle = "#000";
+    context.fillRect(0, 0, width, height);
+    return canvas;
+  }
   const scale = Math.max(width / sourceWidth, height / sourceHeight);
   const drawWidth = sourceWidth * scale;
   const drawHeight = sourceHeight * scale;
@@ -596,8 +626,13 @@ export async function estimatePhotoField(
   targetCount,
   mirror = false,
 ) {
-  const canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
-  const luminance = canvasLuminance(canvas);
+  let canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
+  let luminance = canvasLuminance(canvas);
+  if (luminanceRange(luminance) < 0.04 && source.videoWidth > 1) {
+    await waitSourceFrame(source);
+    canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
+    luminance = canvasLuminance(canvas);
+  }
   let personFull = null;
   let nearFull = null;
 

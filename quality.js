@@ -16,6 +16,7 @@ export function detectQuality() {
 }
 
 export function adaptQuality(quality, frameMs, field, particles) {
+  if (frameMs > 220) return false;
   if (frameMs > 38) quality.slowStreak += 1;
   else quality.slowStreak = Math.max(0, quality.slowStreak - 1);
 

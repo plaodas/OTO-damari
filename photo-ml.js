@@ -52,42 +52,51 @@ async function loadModels() {
   }
 }
 
+async function disposeMaskTensors(people) {
+  if (!people) return;
+  for (const person of people) {
+    try {
+      const tensor = await person.mask?.toTensor?.();
+      tensor?.dispose?.();
+    } catch {
+      // Mask tensors are best-effort; a failed dispose must not block the next shot.
+    }
+  }
+}
+
 export async function estimateMidasDepth(canvas) {
   await warmupPhotoModels();
   if (!tf || !midas) return null;
 
-  const input = tf.tidy(() => {
-    const pixels = tf.browser.fromPixels(canvas).toFloat().div(255);
-    const resized = tf.image.resizeBilinear(pixels, [MIDAS_SIZE, MIDAS_SIZE], true);
-    const mean = tf.tensor1d(MEAN);
-    const std = tf.tensor1d(STD);
-    const normalized = resized.sub(mean).div(std);
-    return normalized.transpose([2, 0, 1]).expandDims(0);
-  });
-
-  let output = null;
-  let squeezed = null;
+  tf.engine().startScope();
   try {
+    const input = tf.tidy(() => {
+      const pixels = tf.browser.fromPixels(canvas).toFloat().div(255);
+      const resized = tf.image.resizeBilinear(pixels, [MIDAS_SIZE, MIDAS_SIZE], true);
+      const mean = tf.tensor1d(MEAN);
+      const std = tf.tensor1d(STD);
+      const normalized = resized.sub(mean).div(std);
+      return normalized.transpose([2, 0, 1]).expandDims(0);
+    });
     const executed = midas.execute(input, "797");
-    output = Array.isArray(executed) ? executed[0] : executed;
-    squeezed = output.squeeze();
+    const output = Array.isArray(executed) ? executed[0] : executed;
+    const squeezed = output.squeeze();
     const values = await squeezed.data();
     return { values: new Float32Array(values), width: MIDAS_SIZE, height: MIDAS_SIZE };
   } catch (error) {
     console.warn("MiDaS の推論に失敗しました。", error);
     return null;
   } finally {
-    input.dispose();
-    squeezed?.dispose();
-    if (output && output !== squeezed) output.dispose();
+    tf.engine().endScope();
   }
 }
 
 export async function segmentPerson(canvas) {
   await warmupPhotoModels();
   if (!segmenter) return null;
+  let people = null;
   try {
-    const people = await segmenter.segmentPeople(canvas, {
+    people = await segmenter.segmentPeople(canvas, {
       flipHorizontal: false,
       multiSegmentation: false,
       segmentBodyParts: false,
@@ -106,5 +115,7 @@ export async function segmentPerson(canvas) {
   } catch (error) {
     console.warn("人物マスクの推論に失敗しました。", error);
     return null;
+  } finally {
+    await disposeMaskTensors(people);
   }
 }
