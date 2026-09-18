@@ -31,6 +31,6 @@ void main() {
   vec3 color = mix(vec3(0.04, 0.42, 0.95), vec3(0.55, 0.95, 1.0), core);
   color = mix(color, vec3(0.78, 0.96, 1.0), v_water * 0.6);
   color = mix(color, vec3(0.14, 0.98, 0.4), ring * emit * 0.4);
-  color = mix(color, vec3(0.98, 0.22, 0.16), (0.18 + (1.0 - core) * 0.22) * u_north);
+  color = mix(color, vec3(1.0, 0.7, 0.66), u_north * mix(0.22, 0.9, core));
   fragColor = vec4(color * alpha, alpha);
 }
