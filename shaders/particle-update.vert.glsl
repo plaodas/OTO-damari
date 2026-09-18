@@ -68,7 +68,7 @@ void main() {
     float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
     float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
     float homePull = ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22);
-    vec2 wander = vec2(waveA, waveB) * 0.028 + vec2(u_flowSpeed * 4.0, -u_flowSpeed * 4.6);
+    vec2 wander = vec2(waveA, waveB) * 0.028;
     vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread;
     vel += (a_home - pos) * homePull * u_dt;
   }

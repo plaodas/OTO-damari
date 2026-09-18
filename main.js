@@ -135,7 +135,11 @@ class MotionInput {
     this.armedAt = 0;
     this.gravityX = 0;
     this.gravityY = 0;
+    this.restX = 0;
+    this.restY = 0;
+    this.restReady = false;
     this.hasOrientation = false;
+    this.gotRelativeOrientation = false;
     this.onShake = null;
     this.android = /Android/i.test(navigator.userAgent);
   }
@@ -172,7 +176,7 @@ class MotionInput {
     if (this.bound) return;
     this.bound = true;
     this.started = true;
-    this.armedAt = performance.now() + 400;
+    this.armedAt = performance.now() + 450;
     window.addEventListener("devicemotion", this.handleMotion, { passive: true });
     window.addEventListener("deviceorientation", this.handleOrientation, { passive: true });
     window.addEventListener("deviceorientationabsolute", this.handleOrientation, { passive: true });
@@ -190,6 +194,17 @@ class MotionInput {
     return { x, y };
   }
 
+  setRawTilt(x, y) {
+    const clamp = (value) => Math.max(-1, Math.min(1, value));
+    this.gravityX += (clamp(x) - this.gravityX) * 0.22;
+    this.gravityY += (clamp(y) - this.gravityY) * 0.22;
+    if (!this.restReady && performance.now() >= this.armedAt) {
+      this.restX = this.gravityX;
+      this.restY = this.gravityY;
+      this.restReady = true;
+    }
+  }
+
   handleMotion = (event) => {
     const gravity = event.accelerationIncludingGravity;
     if (!this.hasOrientation && gravity && Number.isFinite(gravity.x) && Number.isFinite(gravity.y)) {
@@ -197,8 +212,7 @@ class MotionInput {
       if (mag > 6) {
         const sign = this.android ? 1 : -1;
         const mapped = this.rotateToScreen(sign * (gravity.x / mag), sign * ((gravity.z || 0) / mag));
-        this.gravityX += (mapped.x - this.gravityX) * 0.18;
-        this.gravityY += (mapped.y - this.gravityY) * 0.18;
+        this.setRawTilt(mapped.x, mapped.y);
       }
     }
 
@@ -222,21 +236,35 @@ class MotionInput {
   };
 
   handleOrientation = (event) => {
+    if (event.type === "deviceorientationabsolute" && this.gotRelativeOrientation) return;
     if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+    if (event.type === "deviceorientation") this.gotRelativeOrientation = true;
     this.hasOrientation = true;
     const mapped = this.rotateToScreen(event.gamma / 32, (event.beta - 90) / 32);
-    this.gravityX += (Math.max(-1, Math.min(1, mapped.x)) - this.gravityX) * 0.22;
-    this.gravityY += (Math.max(-1, Math.min(1, mapped.y)) - this.gravityY) * 0.22;
+    this.setRawTilt(mapped.x, mapped.y);
   };
 
   update() {
-    if (!this.started) return;
+    if (!this.started || !this.restReady) {
+      this.tiltX += (0 - this.tiltX) * 0.28;
+      this.tiltY += (0 - this.tiltY) * 0.28;
+      return;
+    }
+
     const clamp = (value) => Math.max(-1, Math.min(1, value));
-    const dead = 0.08;
-    const x = clamp(this.gravityX);
-    const y = clamp(this.gravityY);
-    this.tiltX += ((Math.abs(x) < dead ? 0 : x) - this.tiltX) * 0.22;
-    this.tiltY += ((Math.abs(y) < dead ? 0 : y) - this.tiltY) * 0.22;
+    const x = clamp(this.gravityX - this.restX);
+    const y = clamp(this.gravityY - this.restY);
+    const mag = Math.hypot(x, y);
+    if (mag < 0.16) {
+      this.restX += (this.gravityX - this.restX) * 0.05;
+      this.restY += (this.gravityY - this.restY) * 0.05;
+    }
+
+    const nx = clamp(this.gravityX - this.restX);
+    const ny = clamp(this.gravityY - this.restY);
+    const dead = 0.1;
+    this.tiltX += ((Math.abs(nx) < dead ? 0 : nx) - this.tiltX) * 0.22;
+    this.tiltY += ((Math.abs(ny) < dead ? 0 : ny) - this.tiltY) * 0.22;
   }
 }
 
