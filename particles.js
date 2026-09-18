@@ -20,7 +20,7 @@ export class ParticleField {
     this.sizePulse = 0;
     this.waterSheen = 0;
     this.flowBoost = 0;
-    this.flowSpeed = 8;
+    this.flowSpeed = 4;
     this.trailFade = 0;
     this.bloomAge = 0;
     this.disperse = 0;
@@ -65,6 +65,7 @@ export class ParticleField {
       "u_impact",
       "u_tilt",
       "u_shake",
+      "u_blowLevel",
     ]);
     this.drawUniforms = getUniforms(gl, programs.particle, [
       "u_resolution",
@@ -155,8 +156,8 @@ export class ParticleField {
       const s = i * STATE_STRIDE;
       state[s] = Math.random();
       state[s + 1] = Math.random();
-      state[s + 2] = (Math.random() - 0.5) * 0.05;
-      state[s + 3] = (Math.random() - 0.5) * 0.05;
+      state[s + 2] = (Math.random() - 0.5) * 0.018;
+      state[s + 3] = (Math.random() - 0.5) * 0.018;
       const e = i * STATIC_STRIDE;
       extra[e] = 3 + Math.random() * 9;
       extra[e + 1] = 0.35 + Math.random() * 0.65;
@@ -308,10 +309,15 @@ export class ParticleField {
     this.lastSwipeY = toY / this.height;
     this.setAxis(toX - x, toY - y);
     this.bloomLength = this.lengthToEdge();
-    this.pulse("strong");
+    this.glowPulse = Math.max(this.glowPulse, 0.55);
+    this.flowBoost = Math.max(this.flowBoost, 0.68);
+    this.trailFade = Math.max(this.trailFade, 0.5);
+    this.bloomAge = 0;
+    this.disperse = 0;
+    this.didBurst = false;
     if (this.field?.enabled) {
-      this.field.splat(this.originX, this.originY, this.axisX * 0.08, this.axisY * 0.08, 0.012);
-      this.field.splat(this.lastSwipeX, this.lastSwipeY, this.axisX * 0.06, this.axisY * 0.06, 0.01);
+      this.field.splat(this.originX, this.originY, this.axisX * 0.04, this.axisY * 0.04, 0.012);
+      this.field.splat(this.lastSwipeX, this.lastSwipeY, this.axisX * 0.03, this.axisY * 0.03, 0.01);
     }
   }
 
@@ -321,8 +327,8 @@ export class ParticleField {
     this.setAxis(nx - this.originX, ny - this.originY);
     this.bloomLength = this.lengthToEdge();
     if (this.field?.enabled) {
-      const fx = (nx - this.lastSwipeX) * 0.9;
-      const fy = (ny - this.lastSwipeY) * 0.9;
+      const fx = (nx - this.lastSwipeX) * 0.45;
+      const fy = (ny - this.lastSwipeY) * 0.45;
       this.field.splat(nx, ny, fx, fy, 0.01);
     }
     this.lastSwipeX = nx;
@@ -417,11 +423,13 @@ export class ParticleField {
     this.blowLevel = blowLevel;
 
     const blooming = blowLevel === 3 || this.swipeActive;
+    const swipeOnly = this.swipeActive && blowLevel !== 3;
     const flowLevel = blooming ? 3 : blowLevel;
-    const flowTarget = [8, 11, 52, 132][flowLevel] + this.flowBoost * 36;
+    const flowScale = swipeOnly ? 0.5 : 1;
+    const flowTarget = ([4, 11, 52, 132][flowLevel] + this.flowBoost * 36) * flowScale;
     this.flowSpeed += (flowTarget - this.flowSpeed) * Math.min(1, 0.08 * frames);
     this.trailFade = blooming
-      ? Math.min(0.42, this.trailFade + deltaSeconds * 2.4)
+      ? Math.min(swipeOnly ? 0.21 : 0.42, this.trailFade + deltaSeconds * (swipeOnly ? 1.2 : 2.4))
       : this.trailFade * Math.pow(0.9, frames);
 
     if (blowLevel === 3) this.setBlowOrigin();
@@ -445,7 +453,7 @@ export class ParticleField {
     this.burst = 0;
     if (blooming && this.disperse > 0.2 && !this.didBurst) {
       this.didBurst = true;
-      this.burst = 0.08;
+      this.burst = swipeOnly ? 0.04 : 0.08;
     }
 
     const flowUv = this.flowSpeed / Math.max(this.height, 1);
@@ -468,7 +476,7 @@ export class ParticleField {
         flow: flowUv,
         dt: deltaSeconds,
       });
-      this.field.step(deltaSeconds);
+      this.field.step(deltaSeconds, blowLevel === 0 && !blooming ? 0.968 : 0.985);
     }
 
     const write = 1 - this.read;
@@ -501,6 +509,7 @@ export class ParticleField {
     gl.uniform1f(this.updateUniforms.u_impact, this.impactForce);
     gl.uniform2f(this.updateUniforms.u_tilt, this.tiltX, this.tiltY);
     gl.uniform1f(this.updateUniforms.u_shake, this.shakeForce);
+    gl.uniform1f(this.updateUniforms.u_blowLevel, this.blowLevel || 0);
 
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.transformFeedback);
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.stateBuffers[write]);

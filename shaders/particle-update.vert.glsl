@@ -27,6 +27,7 @@ uniform vec2 u_impactPoint;
 uniform float u_impact;
 uniform vec2 u_tilt;
 uniform float u_shake;
+uniform float u_blowLevel;
 
 out vec2 v_position;
 out vec2 v_velocity;
@@ -40,6 +41,7 @@ void main() {
   float shapeShare = 1.0 - step(0.8, shapeSeed);
   float shapeReveal = smoothstep(shapeSeed * 0.72, shapeSeed * 0.72 + 0.3, u_photoAmount);
   float photoHold = shapeReveal * shapeShare * photo.a;
+  float idle = 1.0 - max(u_gather, max(step(0.5, u_blooming), step(0.5, u_blowLevel)));
   float spread = ambient > 0.5 ? 1.0 : (u_blooming > 0.5 ? u_disperse : 1.0);
   vec2 rel = pos - u_origin;
   float along = dot(rel, u_axis);
@@ -50,7 +52,7 @@ void main() {
   if (u_hasField > 0.5) {
     vec2 field = texture(u_velocity, clamp(vec2(pos.x, 1.0 - pos.y), 0.002, 0.998)).xy;
     field.y = -field.y;
-    vel += field * mix(1.0, 0.08, ambient) * (1.0 - photoHold * 0.92);
+    vel += field * mix(1.0, 0.08, ambient) * mix(1.0, 0.22, idle) * (1.0 - photoHold * 0.92);
   }
 
   if (u_gather > 0.02 && ambient < 0.5 && photoHold < 0.2) {
@@ -72,12 +74,16 @@ void main() {
   }
 
   if (spread > 0.02) {
-    float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
-    float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
-    float homePull = ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22);
-    vec2 wander = vec2(waveA, waveB) * 0.028;
+    float waveA = sin(u_time * mix(0.72, 0.26, idle) + a_phase + pos.y * mix(6.0, 2.2, idle));
+    float waveB = cos(u_time * mix(0.51, 0.19, idle) - a_phase * 1.7 + pos.x * mix(5.0, 1.8, idle));
+    float homePull = mix(
+      ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
+      ambient > 0.5 ? 0.46 : 0.38,
+      idle
+    );
+    vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.01, idle);
     float freedom = 1.0 - photoHold * 0.88;
-    vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread * freedom;
+    vel += (wander - vel) * min(1.0, mix(1.8, 0.55, idle) * u_dt) * spread * freedom;
     vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
@@ -117,7 +123,7 @@ void main() {
     vel += jolt * u_shake * 0.28;
   }
 
-  float damping = mix(0.965, 0.972, step(0.55, u_gather) * (1.0 - ambient));
+  float damping = mix(mix(0.965, 0.948, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
   vel *= pow(damping, u_dt * 60.0);
   pos += vel * u_dt;
 

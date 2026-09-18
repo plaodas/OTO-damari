@@ -149,7 +149,7 @@ export class VelocityField {
     this.read = write;
   }
 
-  step(dt) {
+  step(dt, dissipation = 0.985) {
     if (!this.enabled) return;
     const gl = this.gl;
     const texel = [1 / this.width, 1 / this.height];
@@ -160,7 +160,7 @@ export class VelocityField {
       gl.bindTexture(gl.TEXTURE_2D, this.velocity[this.read].texture);
       gl.uniform1i(this.uniforms.advect.u_velocity, 0);
       gl.uniform1f(this.uniforms.advect.u_dt, dt);
-      gl.uniform1f(this.uniforms.advect.u_dissipation, 0.985);
+      gl.uniform1f(this.uniforms.advect.u_dissipation, dissipation);
     });
     this.read = write;
 
