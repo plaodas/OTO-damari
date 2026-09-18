@@ -23,6 +23,8 @@ uniform float u_bloomLength;
 uniform float u_swipeHeld;
 uniform vec2 u_impactPoint;
 uniform float u_impact;
+uniform vec2 u_tilt;
+uniform float u_shake;
 
 out vec2 v_position;
 out vec2 v_velocity;
@@ -83,6 +85,16 @@ void main() {
     if (dist < radius) {
       vel += normalize(delta + vec2(0.0001)) * (1.0 - dist / radius) * u_impact * mix(0.45, 0.18, ambient);
     }
+  }
+
+  float tiltLen = length(u_tilt);
+  vel += u_tilt * (0.055 + tiltLen * 0.04);
+  if (u_shake > 0.01) {
+    vec2 jolt = vec2(
+      sin(a_phase * 17.0 + u_time * 31.0),
+      cos(a_phase * 13.0 - u_time * 27.0)
+    );
+    vel += jolt * u_shake * 0.28;
   }
 
   float damping = mix(0.965, 0.972, step(0.55, u_gather) * (1.0 - ambient));

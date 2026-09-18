@@ -124,6 +124,122 @@ class MicInput {
   }
 }
 
+class MotionInput {
+  constructor() {
+    this.tiltX = 0;
+    this.tiltY = 0;
+    this.started = false;
+    this.startPromise = null;
+    this.lastShakeAt = 0;
+    this.armedAt = 0;
+    this.gravityX = 0;
+    this.gravityY = 0;
+    this.hasGravity = false;
+    this.onShake = null;
+  }
+
+  start() {
+    if (this.startPromise) return this.startPromise;
+
+    this.startPromise = this.requestPermission()
+      .then((allowed) => {
+        if (!allowed) return;
+        this.started = true;
+        this.armedAt = performance.now() + 450;
+        window.addEventListener("devicemotion", this.handleMotion, { passive: true });
+        window.addEventListener("deviceorientation", this.handleOrientation, { passive: true });
+      })
+      .catch((error) => {
+        console.warn("端末の傾き・シェイクを開始できませんでした。", error);
+      });
+
+    return this.startPromise;
+  }
+
+  async requestPermission() {
+    const motion = window.DeviceMotionEvent;
+    const orientation = window.DeviceOrientationEvent;
+    if (!motion && !orientation) return false;
+
+    try {
+      if (typeof motion?.requestPermission === "function") {
+        const state = await motion.requestPermission();
+        if (state !== "granted") return false;
+      }
+      if (typeof orientation?.requestPermission === "function") {
+        await orientation.requestPermission().catch(() => "denied");
+      }
+    } catch (error) {
+      console.warn("モーションセンサーの許可を取得できませんでした。", error);
+      return false;
+    }
+    return true;
+  }
+
+  screenGravity(gx, gy) {
+    const angle = Number(screen.orientation?.angle ?? window.orientation ?? 0);
+    let x = gx;
+    let y = gy;
+    if (angle === 90) {
+      x = gy;
+      y = -gx;
+    } else if (angle === 180) {
+      x = -gx;
+      y = -gy;
+    } else if (angle === 270 || angle === -90) {
+      x = -gy;
+      y = gx;
+    }
+    return { x: x / 9.81, y: -y / 9.81 };
+  }
+
+  handleMotion = (event) => {
+    const gravity = event.accelerationIncludingGravity;
+    if (gravity && Number.isFinite(gravity.x) && Number.isFinite(gravity.y)) {
+      const mapped = this.screenGravity(gravity.x, gravity.y);
+      this.gravityX += (mapped.x - this.gravityX) * 0.14;
+      this.gravityY += (mapped.y - this.gravityY) * 0.14;
+      this.hasGravity = true;
+    }
+
+    const user = event.acceleration;
+    const ax = user?.x;
+    const ay = user?.y;
+    const az = user?.z;
+    const strength =
+      Number.isFinite(ax) && Number.isFinite(ay) && Number.isFinite(az)
+        ? Math.hypot(ax, ay, az)
+        : Number.isFinite(gravity?.x) && Number.isFinite(gravity?.y)
+          ? Math.abs(Math.hypot(gravity.x, gravity.y, gravity.z || 0) - 9.81)
+          : 0;
+
+    const now = performance.now();
+    if (now < this.armedAt) return;
+    if (strength > 13 && now - this.lastShakeAt > 480) {
+      this.lastShakeAt = now;
+      this.onShake?.(Math.min(1.3, (strength - 13) / 14));
+    }
+  };
+
+  handleOrientation = (event) => {
+    if (this.hasGravity) return;
+    if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+    const mapped = this.screenGravity(event.gamma / 9, (event.beta - 45) / 9);
+    this.gravityX += (mapped.x - this.gravityX) * 0.12;
+    this.gravityY += (mapped.y - this.gravityY) * 0.12;
+  };
+
+  update() {
+    if (!this.started) return;
+    const clamp = (value) => Math.max(-1, Math.min(1, value));
+    const dead = 0.06;
+    const x = clamp(this.gravityX);
+    const y = clamp(this.gravityY);
+    this.tiltX += ((Math.abs(x) < dead ? 0 : x) - this.tiltX) * 0.18;
+    this.tiltY += ((Math.abs(y) < dead ? 0 : y) - this.tiltY) * 0.18;
+  }
+}
+
 class HybridSynth {
   constructor() {
     this.context = null;
@@ -481,7 +597,13 @@ async function start() {
   particles.field = field;
   const mic = new MicInput();
   const synth = new HybridSynth();
+  const motion = new MotionInput();
   let lastLevel = 0;
+  motion.onShake = (amount) => {
+    particles.shake(amount);
+    synth.unlock();
+    synth.playKirari();
+  };
   let volumeCloseTimer = 0;
 
   function updateVolumeControl() {
@@ -582,6 +704,7 @@ async function start() {
 
     const context = synth.unlock();
     synth.playTap();
+    motion.start();
     if (!inputStarted && context && navigator.mediaDevices?.getUserMedia) {
       inputStarted = true;
       mic.start(context);
@@ -617,6 +740,8 @@ async function start() {
     previousTime = now;
 
     mic.update();
+    motion.update();
+    particles.setTilt(motion.tiltX, motion.tiltY);
     if (mic.level !== lastLevel) {
       if (mic.level === 3) synth.startShimmer();
       else synth.stopShimmer();

@@ -36,6 +36,9 @@ export class ParticleField {
     this.bloomLength = 0.4;
     this.lastSwipeX = 0.5;
     this.lastSwipeY = 0.5;
+    this.tiltX = 0;
+    this.tiltY = 0;
+    this.shakeForce = 0;
 
     this.updateUniforms = getUniforms(gl, programs.update, [
       "u_velocity",
@@ -54,6 +57,8 @@ export class ParticleField {
       "u_swipeHeld",
       "u_impactPoint",
       "u_impact",
+      "u_tilt",
+      "u_shake",
     ]);
     this.drawUniforms = getUniforms(gl, programs.particle, [
       "u_resolution",
@@ -306,6 +311,28 @@ export class ParticleField {
     }
   }
 
+  setTilt(x, y) {
+    this.tiltX = x;
+    this.tiltY = y;
+  }
+
+  shake(amount) {
+    const force = Math.max(0, Math.min(1.4, amount));
+    this.shakeForce = Math.max(this.shakeForce, force);
+    this.glowPulse = Math.max(this.glowPulse, 0.45 + force * 0.35);
+    this.flowBoost = Math.max(this.flowBoost, 0.55 + force * 0.4);
+    this.trailFade = Math.max(this.trailFade, 0.18 + force * 0.22);
+    if (!this.field?.enabled) return;
+    const count = 4 + Math.floor(force * 3);
+    for (let i = 0; i < count; i += 1) {
+      const x = 0.12 + Math.random() * 0.76;
+      const y = 0.12 + Math.random() * 0.76;
+      const angle = Math.random() * Math.PI * 2;
+      const mag = 0.06 + force * 0.1;
+      this.field.splat(x, y, Math.cos(angle) * mag, Math.sin(angle) * mag, 0.016 + force * 0.01);
+    }
+  }
+
   update(deltaSeconds, elapsedSeconds, blowEnergy, blowLevel) {
     const gl = this.gl;
     const frames = deltaSeconds * 60;
@@ -314,6 +341,7 @@ export class ParticleField {
     this.waterSheen *= Math.pow(0.96, frames);
     this.flowBoost *= Math.pow(0.97, frames);
     this.impactForce *= Math.pow(0.82, frames);
+    this.shakeForce *= Math.pow(0.78, frames);
     this.blowEnergy = blowEnergy;
     this.blowLevel = blowLevel;
 
@@ -396,6 +424,8 @@ export class ParticleField {
     gl.uniform1f(this.updateUniforms.u_swipeHeld, this.swipeHeld ? 1 : 0);
     gl.uniform2f(this.updateUniforms.u_impactPoint, this.impactX, this.impactY);
     gl.uniform1f(this.updateUniforms.u_impact, this.impactForce);
+    gl.uniform2f(this.updateUniforms.u_tilt, this.tiltX, this.tiltY);
+    gl.uniform1f(this.updateUniforms.u_shake, this.shakeForce);
 
     gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, this.transformFeedback);
     gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, this.stateBuffers[write]);
