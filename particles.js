@@ -16,6 +16,7 @@ export class ParticleField {
     this.pixelRatio = 1;
     this.read = 0;
     this.glowPulse = 0;
+    this.glowFade = 0;
     this.sizePulse = 0;
     this.waterSheen = 0;
     this.flowBoost = 0;
@@ -73,6 +74,7 @@ export class ParticleField {
       "u_blowEnergy",
       "u_blooming",
       "u_glowPulse",
+      "u_glowFade",
       "u_blowLevel",
       "u_noise",
       "u_maxPointSize",
@@ -88,6 +90,7 @@ export class ParticleField {
           "u_blowEnergy",
           "u_blooming",
           "u_glowPulse",
+          "u_glowFade",
           "u_blowLevel",
           "u_noise",
         ])
@@ -395,6 +398,9 @@ export class ParticleField {
     const gl = this.gl;
     const frames = deltaSeconds * 60;
     this.glowPulse *= Math.pow(0.92, frames);
+    const bloomingNow = blowLevel === 3 || this.swipeActive;
+    const emitTarget = Math.max(this.glowPulse, bloomingNow ? 1 : 0, blowLevel >= 2 ? 0.4 : 0);
+    this.glowFade = Math.max(emitTarget, this.glowFade * Math.pow(0.96, frames));
     this.sizePulse *= Math.pow(0.94, frames);
     this.waterSheen *= Math.pow(0.96, frames);
     this.flowBoost *= Math.pow(0.97, frames);
@@ -532,6 +538,7 @@ export class ParticleField {
       gl.uniform1f(this.quadUniforms.u_blowEnergy, this.blowEnergy || 0);
       gl.uniform1f(this.quadUniforms.u_blooming, blooming);
       gl.uniform1f(this.quadUniforms.u_glowPulse, this.glowPulse);
+      gl.uniform1f(this.quadUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.quadUniforms.u_blowLevel, this.blowLevel || 0);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
     } else {
@@ -545,6 +552,7 @@ export class ParticleField {
       gl.uniform1f(this.drawUniforms.u_blowEnergy, this.blowEnergy || 0);
       gl.uniform1f(this.drawUniforms.u_blooming, blooming);
       gl.uniform1f(this.drawUniforms.u_glowPulse, this.glowPulse);
+      gl.uniform1f(this.drawUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.drawUniforms.u_blowLevel, this.blowLevel || 0);
       gl.uniform1f(this.drawUniforms.u_maxPointSize, this.maxPointSize);
       gl.drawArrays(gl.POINTS, 0, this.count);
