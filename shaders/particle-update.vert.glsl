@@ -48,6 +48,17 @@ vec2 shakeVortex(vec2 pos, vec2 center, float sense, float strength) {
   return force;
 }
 
+vec2 shakeConvection(vec2 pos, float strength) {
+  float x = pos.x - 0.5;
+  float fromBottom = smoothstep(0.06, 0.94, pos.y);
+  float plume = exp(-x * x / 0.011);
+  vec2 force = vec2(0.0, -1.0) * plume * mix(0.32, 1.0, fromBottom) * strength;
+  float sides = (1.0 - plume) * smoothstep(0.06, 0.26, abs(x));
+  force.y += sides * mix(0.55, 0.28, fromBottom) * strength;
+  force.x += sign(x + 0.0001) * plume * mix(0.28, -0.42, fromBottom) * strength;
+  return force;
+}
+
 void main() {
   vec2 pos = a_position;
   vec2 vel = a_velocity;
@@ -137,10 +148,11 @@ void main() {
   vel += u_tilt * (0.011 + tiltLen * 0.008) * (1.0 - photoHold * 0.9);
   vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
-    float curl = u_shake * 0.34;
+    float curl = u_shake * 0.26;
     vel += shakeVortex(pos, vec2(0.5, 0.22), 1.0, curl);
     vel += shakeVortex(pos, vec2(0.5, 0.5), 1.0, curl);
     vel += shakeVortex(pos, vec2(0.5, 0.78), 1.0, curl);
+    vel += shakeConvection(pos, u_shake * 0.3);
   }
 
   float damping = mix(mix(0.965, 0.96, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));

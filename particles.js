@@ -395,12 +395,19 @@ export class ParticleField {
     this.flowBoost = Math.max(this.flowBoost, 0.55 + force * 0.4);
     this.trailFade = Math.max(this.trailFade, 0.28 + force * 0.32);
     if (!this.field?.enabled) return;
-    const mag = 0.07 + force * 0.1;
+    const mag = 0.05 + force * 0.08;
     const radius = 0.05;
     const centers = [0.22, 0.5, 0.78];
     for (let i = 0; i < centers.length; i += 1) {
       this.field.addVortex(0.5, centers[i], mag, radius, 0.2, 0.095);
     }
+    const rise = 0.045 + force * 0.07;
+    for (let y = 0.86; y >= 0.14; y -= 0.12) {
+      const fromBottom = (y - 0.14) / 0.72;
+      this.field.splat(0.5, y, 0, -rise * (0.4 + fromBottom * 0.8), 0.018);
+    }
+    this.field.splat(0.26, 0.45, 0, rise * 0.4, 0.022);
+    this.field.splat(0.74, 0.45, 0, rise * 0.4, 0.022);
   }
 
   update(deltaSeconds, elapsedSeconds, blowEnergy, blowLevel) {
