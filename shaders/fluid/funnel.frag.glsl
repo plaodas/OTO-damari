@@ -32,14 +32,15 @@ void main() {
   float petal = 0.86 + 0.14 * pow(abs(cos(theta * 2.5)), 1.1);
   float halfWidth = (0.045 + flare * 0.42) * petal;
   float mask = exp(-pow(across / max(halfWidth, 0.02), 2.0));
-  mask *= smoothstep(-0.04, 0.02, along) * smoothstep(bloom * 1.15, bloom * 0.15, along);
+  mask *= smoothstep(-0.04, 0.02, along);
+  mask *= 1.0 - smoothstep(bloom * 1.05, bloom * 1.85, along);
   vec2 force = u_axis * u_flow * (0.55 + rise * 0.6);
   force += u_perp * sign(across + 0.00001) * u_flow * flare * 0.45;
   if (rise > 0.5) {
     float lip = clamp((rise - 0.5) / 0.5, 0.0, 1.0);
     float curl = lip * lip * (3.0 - 2.0 * lip);
     force += u_perp * sign(across + 0.00001) * u_flow * 0.7 * curl;
-    force -= u_axis * u_flow * 0.35 * curl;
+    force += u_axis * u_flow * 0.18 * curl;
   }
   fragColor = vec4(vel + force * mask * u_gather * u_dt * 2.2, 0.0, 1.0);
 }

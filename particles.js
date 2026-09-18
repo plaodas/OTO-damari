@@ -245,12 +245,22 @@ export class ParticleField {
     this.perpY = this.axisX;
   }
 
+  lengthToEdge() {
+    const { originX: ox, originY: oy, axisX: ax, axisY: ay } = this;
+    let t = 1.35;
+    if (ax > 1e-4) t = Math.min(t, (1.08 - ox) / ax);
+    else if (ax < -1e-4) t = Math.min(t, (-0.08 - ox) / ax);
+    if (ay > 1e-4) t = Math.min(t, (1.08 - oy) / ay);
+    else if (ay < -1e-4) t = Math.min(t, (-0.08 - oy) / ay);
+    return Math.max(0.45, t);
+  }
+
   setBlowOrigin() {
     if (this.swipeHeld) return;
     this.originX = 0.5;
     this.originY = 0.9;
     this.setAxis(0, -1);
-    this.bloomLength = 0.72;
+    this.bloomLength = this.lengthToEdge();
   }
 
   beginSwipe(x, y, toX, toY) {
@@ -261,7 +271,7 @@ export class ParticleField {
     this.lastSwipeX = toX / this.width;
     this.lastSwipeY = toY / this.height;
     this.setAxis(toX - x, toY - y);
-    this.bloomLength = Math.max(0.35, Math.hypot(toX - x, toY - y) / Math.max(this.width, this.height));
+    this.bloomLength = this.lengthToEdge();
     this.pulse("strong");
     if (this.field?.enabled) {
       this.field.splat(this.originX, this.originY, this.axisX * 0.08, this.axisY * 0.08, 0.012);
@@ -273,10 +283,7 @@ export class ParticleField {
     const nx = x / this.width;
     const ny = y / this.height;
     this.setAxis(nx - this.originX, ny - this.originY);
-    this.bloomLength = Math.max(
-      0.35,
-      Math.hypot(nx - this.originX, ny - this.originY),
-    );
+    this.bloomLength = this.lengthToEdge();
     if (this.field?.enabled) {
       const fx = (nx - this.lastSwipeX) * 0.9;
       const fy = (ny - this.lastSwipeY) * 0.9;

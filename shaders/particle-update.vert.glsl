@@ -30,7 +30,8 @@ out vec2 v_velocity;
 void main() {
   vec2 pos = a_position;
   vec2 vel = a_velocity;
-  float spread = u_blooming > 0.5 ? u_disperse : 1.0;
+  float ambient = step(0.52, fract(a_phase * 1.17 + a_home.x * 0.73));
+  float spread = ambient > 0.5 ? 1.0 : (u_blooming > 0.5 ? u_disperse : 1.0);
   vec2 rel = pos - u_origin;
   float along = dot(rel, u_axis);
   float across = dot(rel, u_perp);
@@ -40,10 +41,10 @@ void main() {
   if (u_hasField > 0.5) {
     vec2 field = texture(u_velocity, clamp(vec2(pos.x, 1.0 - pos.y), 0.002, 0.998)).xy;
     field.y = -field.y;
-    vel += field;
+    vel += field * mix(1.0, 0.08, ambient);
   }
 
-  if (u_gather > 0.02) {
+  if (u_gather > 0.02 && ambient < 0.5) {
     float theta = atan(across, max(0.012, along));
     float petal = 0.86 + 0.14 * pow(abs(cos(theta * 2.5)), 1.1);
     float tube = 0.14;
@@ -64,13 +65,13 @@ void main() {
   if (spread > 0.02) {
     float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
     float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
-    float homePull = u_blooming > 0.5 ? 1.15 * u_disperse : 0.22;
+    float homePull = ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22);
     vec2 wander = vec2(waveA, waveB) * 0.028 + vec2(u_flowSpeed * 4.0, -u_flowSpeed * 4.6);
     vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread;
     vel += (a_home - pos) * homePull * u_dt;
   }
 
-  if (u_burst > 0.01) {
+  if (u_burst > 0.01 && ambient < 0.5) {
     float len = max(0.02, length(rel));
     vel += (rel / len) * u_burst;
   }
@@ -80,18 +81,17 @@ void main() {
     float dist = length(delta);
     float radius = 0.34;
     if (dist < radius) {
-      vel += normalize(delta + vec2(0.0001)) * (1.0 - dist / radius) * u_impact * 0.45;
+      vel += normalize(delta + vec2(0.0001)) * (1.0 - dist / radius) * u_impact * mix(0.45, 0.18, ambient);
     }
   }
 
-  float damping = mix(0.965, 0.972, step(0.55, u_gather));
+  float damping = mix(0.965, 0.972, step(0.55, u_gather) * (1.0 - ambient));
   vel *= pow(damping, u_dt * 60.0);
   pos += vel * u_dt;
 
   along = dot(pos - u_origin, u_axis);
-  bool recycle = u_blooming > 0.5 && u_disperse < 0.42;
-  bool off = pos.x < 0.0 || pos.x > 1.0 || pos.y < 0.0 || pos.y > 1.0;
-  if (recycle && (along < -0.04 || ((off || along > bloom * 1.12) && u_swipeHeld < 0.5))) {
+  bool recycle = ambient < 0.5 && u_blooming > 0.5 && u_disperse < 0.42 && along < -0.04;
+  if (recycle) {
     float t = 0.1 + fract(a_phase * 1.73) * 0.55;
     float halfW = 0.055 + 0.28 * t * t;
     pos = u_origin + u_axis * (t * bloom) + u_perp * a_lane * halfW * 0.5;
