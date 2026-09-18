@@ -36,7 +36,10 @@ void main() {
   vec2 vel = a_velocity;
   float ambient = step(0.52, fract(a_phase * 1.17 + a_home.x * 0.73));
   vec4 photo = texelFetch(u_photoField, ivec2(gl_VertexID, 0), 0);
-  float photoHold = u_photoAmount * photo.a;
+  float shapeSeed = fract(a_phase * 0.7548777 + a_home.x * 0.5698403);
+  float shapeShare = 1.0 - step(0.7, shapeSeed);
+  float shapeReveal = smoothstep(shapeSeed * 0.72, shapeSeed * 0.72 + 0.3, u_photoAmount);
+  float photoHold = shapeReveal * shapeShare * photo.a;
   float spread = ambient > 0.5 ? 1.0 : (u_blooming > 0.5 ? u_disperse : 1.0);
   vec2 rel = pos - u_origin;
   float along = dot(rel, u_axis);
@@ -68,21 +71,26 @@ void main() {
     if (along < bloom * 0.22) vel += u_axis * u_flowSpeed * 1.6 * u_gather * u_dt;
   }
 
-  if (spread > 0.02 && photoHold < 0.18) {
+  if (spread > 0.02) {
     float waveA = sin(u_time * 0.72 + a_phase + pos.y * 6.0);
     float waveB = cos(u_time * 0.51 - a_phase * 1.7 + pos.x * 5.0);
     float homePull = ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22);
     vec2 wander = vec2(waveA, waveB) * 0.028;
-    vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread;
-    vel += (a_home - pos) * homePull * u_dt;
+    float freedom = 1.0 - photoHold * 0.88;
+    vel += (wander - vel) * min(1.0, 1.8 * u_dt) * spread * freedom;
+    vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
   if (photoHold > 0.001) {
-    vec2 edgeTarget = photo.rg;
+    vec2 shimmer = vec2(
+      sin(u_time * 0.38 + a_phase * 1.7),
+      cos(u_time * 0.31 - a_phase * 1.3)
+    ) * 0.0035;
+    vec2 edgeTarget = photo.rg + shimmer;
     float revealed = smoothstep(0.0, 0.55, photoHold);
-    float arrive = (1.0 - exp(-u_dt * mix(2.4, 7.5, revealed))) * revealed;
+    float arrive = (1.0 - exp(-u_dt * mix(0.3, 0.9, revealed))) * revealed;
     pos = mix(pos, edgeTarget, arrive);
-    vel *= 1.0 - revealed * 0.9;
+    vel *= 1.0 - revealed * 0.42;
   }
 
   if (u_burst > 0.01 && ambient < 0.5 && photoHold < 0.2) {
@@ -100,7 +108,7 @@ void main() {
   }
 
   float tiltLen = length(u_tilt);
-  vel += u_tilt * (0.055 + tiltLen * 0.04) * (1.0 - photoHold);
+  vel += u_tilt * (0.055 + tiltLen * 0.04) * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
     vec2 jolt = vec2(
       sin(a_phase * 17.0 + u_time * 31.0),

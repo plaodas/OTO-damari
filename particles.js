@@ -396,7 +396,7 @@ export class ParticleField {
     this.flowBoost *= Math.pow(0.97, frames);
     this.impactForce *= Math.pow(0.82, frames);
     this.shakeForce *= Math.pow(0.78, frames);
-    const photoRate = this.photoTarget > this.photoAmount ? 0.85 : 0.55;
+    const photoRate = this.photoTarget > this.photoAmount ? 0.18 : 0.42;
     const photoStep = photoRate * deltaSeconds;
     this.photoAmount += Math.max(-photoStep, Math.min(photoStep, this.photoTarget - this.photoAmount));
     this.blowEnergy = blowEnergy;

@@ -170,9 +170,12 @@ function packTargets(contour, width, height, targetCount) {
     const tx = b.x - contour[(index + contour.length - 1) % contour.length].x;
     const ty = b.y - contour[(index + contour.length - 1) % contour.length].y;
     const len = Math.hypot(tx, ty) || 1;
-    const ribbon = ((i % 3) - 1) * 1.15;
-    const px = x + (-ty / len) * ribbon;
-    const py = y + (tx / len) * ribbon;
+    const hashA = Math.sin((i + 1) * 91.345) * 43758.5453;
+    const hashB = Math.sin((i + 1) * 47.137) * 15731.743;
+    const normalScatter = (hashA - Math.floor(hashA) - 0.5) * 15;
+    const tangentScatter = (hashB - Math.floor(hashB) - 0.5) * 8;
+    const px = x + (-ty / len) * normalScatter + (tx / len) * tangentScatter;
+    const py = y + (tx / len) * normalScatter + (ty / len) * tangentScatter;
     const offset = i * 4;
     pixels[offset] = Math.round(Math.max(0, Math.min(255, (px / width) * 255)));
     pixels[offset + 1] = Math.round(Math.max(0, Math.min(255, (py / height) * 255)));
