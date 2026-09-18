@@ -23,6 +23,12 @@ import { GuidedRestSession } from "./guided-rest.js";
 
 const GRAIN_VOICES = 3;
 const SOLFEGGIO_FREQUENCIES = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+const MAP_NOTE_BANDS = [
+  [852, 963],
+  [639, 741],
+  [396, 417],
+  [174, 285],
+];
 const RESONANCE_VOICE_LIMIT = 5;
 const BLOW_CHORD_FREQUENCIES = [174, 285, 963];
 
@@ -738,12 +744,15 @@ class HybridSynth {
     }
   }
 
-  triggerResonance() {
+  triggerResonance(frequency) {
     const context = this.unlock();
     if (!context || !this.master) return false;
 
-    const frequency = SOLFEGGIO_FREQUENCIES[this.resonanceIndex];
-    this.resonanceIndex = (this.resonanceIndex + 1) % SOLFEGGIO_FREQUENCIES.length;
+    let note = Number(frequency);
+    if (!Number.isFinite(note) || note <= 0) {
+      note = SOLFEGGIO_FREQUENCIES[this.resonanceIndex];
+      this.resonanceIndex = (this.resonanceIndex + 1) % SOLFEGGIO_FREQUENCIES.length;
+    }
 
     const startAt = context.currentTime;
     while (this.resonanceVoices.length >= RESONANCE_VOICE_LIMIT) {
@@ -752,9 +761,9 @@ class HybridSynth {
 
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    const peak = (frequency <= 285 ? 0.02 : 0.014) / Math.sqrt(this.resonanceVoices.length + 1);
+    const peak = (note <= 285 ? 0.02 : 0.014) / Math.sqrt(this.resonanceVoices.length + 1);
     oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, startAt);
+    oscillator.frequency.setValueAtTime(note, startAt);
     gain.gain.setValueAtTime(0.0001, startAt);
     gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.18);
     gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 1.8);
@@ -1174,10 +1183,38 @@ async function start() {
   let appMode = "landing";
   let lastLevel = 0;
   let northWasActive = false;
+  const pointers = new Map();
+  let swipePointerId = null;
 
-  function triggerResonance() {
-    if (!synth.triggerResonance()) return;
+  function triggerResonance(frequency) {
+    if (!synth.triggerResonance(frequency)) return;
     particles.pulseResonance();
+  }
+
+  function noteAtPoint(x, y) {
+    const width = Math.max(1, window.innerWidth);
+    const height = Math.max(1, window.innerHeight);
+    const left = 16;
+    const right = width - 16;
+    const top = 16;
+    const bottom = height - 64;
+    const cx = (left + right) * 0.5;
+    const cy = (top + bottom) * 0.5;
+    const span = Math.max(1, Math.min(right - left, bottom - top));
+    const nx = (x - cx) / span;
+    const ny = (cy - y) / span;
+    if (Math.abs(nx) + Math.abs(ny) < 0.22) return 528;
+    const playH = Math.max(1, bottom - top);
+    const v = (cy - y) / (playH * 0.5);
+    const col = x < cx ? 0 : 1;
+    if (v > 0.5) return MAP_NOTE_BANDS[0][col];
+    if (v > 0) return MAP_NOTE_BANDS[1][col];
+    if (v > -0.5) return MAP_NOTE_BANDS[2][col];
+    return MAP_NOTE_BANDS[3][col];
+  }
+
+  function playMapNote(x, y) {
+    triggerResonance(noteAtPoint(x, y));
   }
 
   motion.onShake = (amount) => {
@@ -1298,6 +1335,13 @@ async function start() {
   }
 
   function setAppMode(mode) {
+    if (mode !== "freeplay" && swipePointerId != null) {
+      particles.releaseSwipe();
+    }
+    if (mode !== "freeplay") {
+      pointers.clear();
+      swipePointerId = null;
+    }
     appMode = mode;
     document.body.classList.remove(
       "mode-landing",
@@ -1486,8 +1530,6 @@ async function start() {
   window.addEventListener("resize", resize, { passive: true });
   resize();
 
-  let pointer = null;
-
   function localPoint(event) {
     const rect = canvas.getBoundingClientRect();
     return {
@@ -1498,29 +1540,31 @@ async function start() {
 
   function endPointer(event) {
     if (appMode !== "freeplay") {
-      pointer = null;
+      pointers.clear();
+      swipePointerId = null;
       return;
     }
+    const id = event?.pointerId;
+    const pointer = id == null ? null : pointers.get(id);
     if (!pointer) return;
-    if (event && pointer.id != null && event.pointerId !== pointer.id) return;
-    const shouldResonate = !pointer.swiping && event?.type !== "pointercancel";
-    if (pointer.swiping) {
+    pointers.delete(id);
+    if (swipePointerId === id) {
       particles.releaseSwipe();
+      swipePointerId = null;
     }
-    pointer = null;
-    if (shouldResonate) triggerResonance();
   }
 
   canvas.addEventListener("pointerdown", (event) => {
     if (appMode !== "freeplay") return;
     event.preventDefault();
     const point = localPoint(event);
-    pointer = {
-      id: event.pointerId,
+    const note = noteAtPoint(point.x, point.y);
+    pointers.set(event.pointerId, {
       startX: point.x,
       startY: point.y,
+      note,
       swiping: false,
-    };
+    });
     particles.impact(point.x, point.y);
     canvas.setPointerCapture?.(event.pointerId);
 
@@ -1530,21 +1574,33 @@ async function start() {
     if (context && navigator.mediaDevices?.getUserMedia) {
       mic.ensure(context);
     }
+    playMapNote(point.x, point.y);
   });
 
   canvas.addEventListener("pointermove", (event) => {
     if (appMode !== "freeplay") return;
-    if (!pointer || event.pointerId !== pointer.id) return;
+    const pointer = pointers.get(event.pointerId);
+    if (!pointer) return;
     event.preventDefault();
     const point = localPoint(event);
     const distance = Math.hypot(point.x - pointer.startX, point.y - pointer.startY);
     if (!pointer.swiping && distance > 28) {
       pointer.swiping = true;
-      particles.beginSwipe(pointer.startX, pointer.startY, point.x, point.y);
-      synth.unlock();
-      triggerResonance();
+      if (swipePointerId == null) {
+        swipePointerId = event.pointerId;
+        particles.beginSwipe(pointer.startX, pointer.startY, point.x, point.y);
+      }
     }
-    if (pointer.swiping) particles.steerSwipe(point.x, point.y);
+    if (pointer.swiping && swipePointerId === event.pointerId) {
+      particles.steerSwipe(point.x, point.y);
+    }
+    if (pointer.swiping) {
+      const note = noteAtPoint(point.x, point.y);
+      if (note !== pointer.note) {
+        pointer.note = note;
+        playMapNote(point.x, point.y);
+      }
+    }
   });
 
   canvas.addEventListener("pointerup", endPointer);
