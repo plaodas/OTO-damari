@@ -153,6 +153,131 @@ function collectContour(keep, nms, width, height) {
   return points;
 }
 
+function hash01(a, b) {
+  const value = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function borderMean(luminance, width, height) {
+  const band = 6;
+  let sum = 0;
+  let count = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (x >= band && y >= band && x < width - band && y < height - band) continue;
+      sum += luminance[y * width + x];
+      count += 1;
+    }
+  }
+  return sum / Math.max(1, count);
+}
+
+function interiorMean(luminance, width, height) {
+  const band = 6;
+  let sum = 0;
+  let count = 0;
+  for (let y = band; y < height - band; y += 1) {
+    for (let x = band; x < width - band; x += 1) {
+      sum += luminance[y * width + x];
+      count += 1;
+    }
+  }
+  return sum / Math.max(1, count);
+}
+
+function buildDensityWeights(luminance, width, height, personMask, near) {
+  const invert = !personMask && borderMean(luminance, width, height) < interiorMean(luminance, width, height) - 0.06;
+  const weights = new Float32Array(luminance.length);
+  const positives = [];
+  for (let i = 0; i < luminance.length; i += 1) {
+    let luma = luminance[i];
+    if (invert) luma = 1 - luma;
+    let weight = (1 - luma) ** 1.6;
+    if (personMask) weight *= Math.max(0, personMask[i]);
+    if (near) weight *= 0.7 + 0.3 * near[i];
+    weights[i] = weight;
+    if (weight > 1e-5) positives.push(weight);
+  }
+
+  if (!personMask && positives.length > 24) {
+    const thresh = percentile(positives, 0.55) * 0.85;
+    for (let i = 0; i < weights.length; i += 1) {
+      weights[i] = Math.max(0, weights[i] - thresh);
+    }
+  }
+  return weights;
+}
+
+function packDensityTargets(weights, width, height, targetCount) {
+  const pixels = new Uint8Array(targetCount * 4);
+  const oversample = 2.2;
+  const cols = Math.max(8, Math.round(Math.sqrt((targetCount * oversample * width) / height)));
+  const rows = Math.max(8, Math.round((targetCount * oversample) / cols));
+  const candidates = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    const y0 = Math.floor((row * height) / rows);
+    const y1 = Math.floor(((row + 1) * height) / rows);
+    for (let col = 0; col < cols; col += 1) {
+      const x0 = Math.floor((col * width) / cols);
+      const x1 = Math.floor(((col + 1) * width) / cols);
+      let best = 0;
+      let bestX = (x0 + x1) * 0.5;
+      let bestY = (y0 + y1) * 0.5;
+      for (let y = y0; y < Math.max(y0 + 1, y1); y += 1) {
+        for (let x = x0; x < Math.max(x0 + 1, x1); x += 1) {
+          const value = weights[y * width + x];
+          if (value <= best) continue;
+          best = value;
+          bestX = x + 0.5;
+          bestY = y + 0.5;
+        }
+      }
+      if (best <= 1e-5) continue;
+      const jx = (hash01(col + 1, row + 3) - 0.5) * Math.max(1, x1 - x0) * 0.35;
+      const jy = (hash01(row + 7, col + 11) - 0.5) * Math.max(1, y1 - y0) * 0.35;
+      candidates.push({
+        x: Math.max(0, Math.min(width - 1, bestX + jx)),
+        y: Math.max(0, Math.min(height - 1, bestY + jy)),
+        w: best,
+      });
+    }
+  }
+
+  if (candidates.length === 0) return pixels;
+
+  let total = 0;
+  for (const candidate of candidates) total += candidate.w;
+  const cdf = new Float32Array(candidates.length);
+  let acc = 0;
+  for (let i = 0; i < candidates.length; i += 1) {
+    acc += candidates[i].w / total;
+    cdf[i] = acc;
+  }
+  cdf[candidates.length - 1] = 1;
+
+  const spacing = Math.max(1, Math.min(width, height) / Math.sqrt(targetCount)) * 0.18;
+  for (let i = 0; i < targetCount; i += 1) {
+    const r = hash01(i + 41, i * 13 + 7);
+    let lo = 0;
+    let hi = cdf.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cdf[mid] < r) lo = mid + 1;
+      else hi = mid;
+    }
+    const source = candidates[lo];
+    const px = source.x + (hash01(i + 19, source.y) - 0.5) * spacing;
+    const py = source.y + (hash01(source.x, i + 29) - 0.5) * spacing;
+    const offset = i * 4;
+    pixels[offset] = Math.round(Math.max(0, Math.min(255, (px / width) * 255)));
+    pixels[offset + 1] = Math.round(Math.max(0, Math.min(255, (py / height) * 255)));
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+  return pixels;
+}
+
 function packTargets(contour, width, height, targetCount) {
   const pixels = new Uint8Array(targetCount * 4);
   if (contour.length === 0) return pixels;
@@ -437,39 +562,18 @@ function normalizeDepth(values) {
   return output;
 }
 
-function contourFromDepth(depth, personMask, width, height) {
-  const near = normalizeDepth(depth);
-  const { mag, gx, gy } = sobel(near, width, height);
-  const nms = nonMaxSuppression(mag, gx, gy, width, height);
-  for (let i = 0; i < nms.length; i += 1) {
-    const person = personMask ? personMask[i] : 1;
-    nms[i] *= (0.35 + 0.65 * person) * (0.55 + 0.45 * near[i]);
+function fieldFromWeights(weights, width, height, targetCount, luminance) {
+  const pixels = packDensityTargets(weights, width, height, targetCount);
+  const hasTarget = pixels[3] > 0;
+  if (hasTarget) {
+    return { width: targetCount, height: 1, pixels };
   }
-
-  const positives = [];
-  for (let i = 0; i < nms.length; i += 1) {
-    if (nms[i] > 0) positives.push(nms[i]);
-  }
-  const high = Math.max(0.012, percentile(positives, 0.88));
-  const keep = hysteresis(nms, width, height, high * 0.38, high);
-  if (personMask) {
-    const binary = new Uint8Array(personMask.length);
-    for (let i = 0; i < personMask.length; i += 1) binary[i] = personMask[i] > 0.5 ? 1 : 0;
-    const outline = silhouette(binary, width, height);
-    if (outline.length >= 60) return outline;
-  }
-  const contour = collectContour(keep, nms, width, height);
-  if (contour.length >= 48) return contour;
-
-  const ranked = [];
-  for (let i = 0; i < nms.length; i += 1) {
-    if (nms[i] > 0) ranked.push({ i, v: nms[i] });
-  }
-  ranked.sort((a, b) => b.v - a.v);
-  const fallback = new Uint8Array(nms.length);
-  const take = Math.min(ranked.length, Math.max(160, Math.floor(ranked.length * 0.05)));
-  for (let n = 0; n < take; n += 1) fallback[ranked[n].i] = 1;
-  return collectContour(fallback, nms, width, height);
+  const contour = extractContour(luminance, width, height);
+  return {
+    width: targetCount,
+    height: 1,
+    pixels: packTargets(contour, width, height, targetCount),
+  };
 }
 
 export function estimateDepthEdges(
@@ -481,12 +585,8 @@ export function estimateDepthEdges(
 ) {
   const canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
   const luminance = canvasLuminance(canvas);
-  const contour = extractContour(luminance, canvas.width, canvas.height);
-  return {
-    width: targetCount,
-    height: 1,
-    pixels: packTargets(contour, canvas.width, canvas.height, targetCount),
-  };
+  const weights = buildDensityWeights(luminance, canvas.width, canvas.height, null, null);
+  return fieldFromWeights(weights, canvas.width, canvas.height, targetCount, luminance);
 }
 
 export async function estimatePhotoField(
@@ -497,33 +597,32 @@ export async function estimatePhotoField(
   mirror = false,
 ) {
   const canvas = captureCoverCanvas(source, viewportWidth, viewportHeight, mirror);
+  const luminance = canvasLuminance(canvas);
+  let personFull = null;
+  let nearFull = null;
+
   try {
     const { estimateMidasDepth, segmentPerson } = await import("./photo-ml.js");
     const depth = await estimateMidasDepth(canvas);
+    const person = await segmentPerson(canvas);
+    if (person) {
+      personFull = resizeFloat(person.values, person.width, person.height, canvas.width, canvas.height);
+    }
     if (depth) {
-      const person = await segmentPerson(canvas);
-      const depthFull = resizeFloat(depth.values, depth.width, depth.height, canvas.width, canvas.height);
-      const personFull = person
-        ? resizeFloat(person.values, person.width, person.height, canvas.width, canvas.height)
-        : null;
-      const contour = contourFromDepth(depthFull, personFull, canvas.width, canvas.height);
-      if (contour.length >= 32) {
-        return {
-          width: targetCount,
-          height: 1,
-          pixels: packTargets(contour, canvas.width, canvas.height, targetCount),
-        };
-      }
+      nearFull = normalizeDepth(
+        resizeFloat(depth.values, depth.width, depth.height, canvas.width, canvas.height),
+      );
     }
   } catch (error) {
-    console.warn("奥行き推定に失敗したため、従来の輪郭処理へ切り替えます。", error);
+    console.warn("奥行き推定に失敗したため、輝度だけで点描します。", error);
   }
 
-  const luminance = canvasLuminance(canvas);
-  const contour = extractContour(luminance, canvas.width, canvas.height);
-  return {
-    width: targetCount,
-    height: 1,
-    pixels: packTargets(contour, canvas.width, canvas.height, targetCount),
-  };
+  const weights = buildDensityWeights(
+    luminance,
+    canvas.width,
+    canvas.height,
+    personFull,
+    nearFull,
+  );
+  return fieldFromWeights(weights, canvas.width, canvas.height, targetCount, luminance);
 }
