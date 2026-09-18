@@ -199,6 +199,11 @@ class MotionInput {
     this.gravityRaw = null;
     this.magRaw = null;
     this.north = 0;
+    this.motionEnergy = 0;
+    this.poseDelta = 0;
+    this.stillSeconds = 0;
+    this.prevGravityX = 0;
+    this.prevGravityY = 0;
     this.onShake = null;
     this.android = /Android/i.test(navigator.userAgent);
   }
@@ -483,6 +488,7 @@ class MotionInput {
           : 0;
 
     const now = performance.now();
+    this.motionEnergy += (Math.min(1, strength / 6) - this.motionEnergy) * 0.28;
     if (now < this.armedAt) return;
     if (strength > 13 && now - this.lastShakeAt > 480) {
       this.lastShakeAt = now;
@@ -518,10 +524,17 @@ class MotionInput {
     this.setRawTilt(mapped.x, mapped.y);
   };
 
-  update() {
+  update(deltaSeconds = 0.016) {
     const heading = this.sensorHeading ?? this.heading;
     const northTarget = heading == null ? 0 : this.northAlignment(heading);
     this.north += (northTarget - this.north) * 0.12;
+
+    const poseChange = Math.hypot(this.gravityX - this.prevGravityX, this.gravityY - this.prevGravityY);
+    this.prevGravityX = this.gravityX;
+    this.prevGravityY = this.gravityY;
+    this.poseDelta += (poseChange - this.poseDelta) * 0.3;
+    const still = this.motionEnergy < 0.16 && this.poseDelta < 0.01;
+    this.stillSeconds = still ? this.stillSeconds + deltaSeconds : 0;
 
     if (!this.started || !this.restReady) {
       this.tiltX += (0 - this.tiltX) * 0.28;
@@ -534,6 +547,15 @@ class MotionInput {
     const dy = clamp(this.gravityY - this.restY);
     const mag = Math.hypot(dx, dy);
     const dead = 0.26;
+
+    if (still) {
+      this.tiltX += (0 - this.tiltX) * 0.35;
+      this.tiltY += (0 - this.tiltY) * 0.35;
+      const catchUp = this.stillSeconds > 0.28 ? 0.28 : 0.1;
+      this.restX += (this.gravityX - this.restX) * catchUp;
+      this.restY += (this.gravityY - this.restY) * catchUp;
+      return;
+    }
 
     if (mag < dead) {
       this.restX += (this.gravityX - this.restX) * 0.12;
@@ -1204,7 +1226,7 @@ async function start() {
     previousTime = now;
 
     mic.update();
-    motion.update();
+    motion.update(deltaSeconds);
     particles.setTilt(motion.tiltX, motion.tiltY, motion.north);
     if (mic.level !== lastLevel) {
       if (mic.level === 3) synth.startShimmer();
