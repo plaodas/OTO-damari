@@ -18,6 +18,8 @@ export class ParticleField {
     this.glowPulse = 0;
     this.glowFade = 0;
     this.sizePulse = 0;
+    this.resonanceAge = Infinity;
+    this.resonanceAmount = 0;
     this.waterSheen = 0;
     this.flowBoost = 0;
     this.flowSpeed = 5;
@@ -273,6 +275,10 @@ export class ParticleField {
     }
   }
 
+  pulseResonance() {
+    this.resonanceAge = 0;
+  }
+
   setAxis(dx, dy) {
     const length = Math.hypot(dx, dy);
     if (length < 1e-5) {
@@ -413,6 +419,10 @@ export class ParticleField {
   update(deltaSeconds, elapsedSeconds, blowEnergy, blowLevel) {
     const gl = this.gl;
     const frames = deltaSeconds * 60;
+    this.resonanceAge += deltaSeconds;
+    const resonancePhase = Math.min(1, this.resonanceAge / 1.8);
+    this.resonanceAmount =
+      this.resonanceAge < 1.8 ? Math.sin(Math.PI * resonancePhase) : 0;
     this.glowPulse *= Math.pow(0.92, frames);
     const bloomingNow = blowLevel === 3 || this.swipeActive;
     const emitTarget = Math.max(this.glowPulse, bloomingNow ? 1 : 0, blowLevel >= 2 ? 0.4 : 0);
@@ -554,10 +564,16 @@ export class ParticleField {
       gl.uniform2f(this.quadUniforms.u_resolution, this.width, this.height);
       gl.uniform1f(this.quadUniforms.u_pixelRatio, this.pixelRatio);
       gl.uniform1f(this.quadUniforms.u_waterSheen, this.waterSheen);
-      gl.uniform1f(this.quadUniforms.u_sizePulse, this.sizePulse);
+      gl.uniform1f(
+        this.quadUniforms.u_sizePulse,
+        this.sizePulse + this.resonanceAmount * 0.18,
+      );
       gl.uniform1f(this.quadUniforms.u_blowEnergy, this.blowEnergy || 0);
       gl.uniform1f(this.quadUniforms.u_blooming, blooming);
-      gl.uniform1f(this.quadUniforms.u_glowPulse, this.glowPulse);
+      gl.uniform1f(
+        this.quadUniforms.u_glowPulse,
+        this.glowPulse + this.resonanceAmount * 0.16,
+      );
       gl.uniform1f(this.quadUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.quadUniforms.u_blowLevel, this.blowLevel || 0);
       gl.uniform1f(this.quadUniforms.u_north, this.north || 0);
@@ -569,10 +585,16 @@ export class ParticleField {
       gl.uniform2f(this.drawUniforms.u_resolution, this.width, this.height);
       gl.uniform1f(this.drawUniforms.u_pixelRatio, this.pixelRatio);
       gl.uniform1f(this.drawUniforms.u_waterSheen, this.waterSheen);
-      gl.uniform1f(this.drawUniforms.u_sizePulse, this.sizePulse);
+      gl.uniform1f(
+        this.drawUniforms.u_sizePulse,
+        this.sizePulse + this.resonanceAmount * 0.18,
+      );
       gl.uniform1f(this.drawUniforms.u_blowEnergy, this.blowEnergy || 0);
       gl.uniform1f(this.drawUniforms.u_blooming, blooming);
-      gl.uniform1f(this.drawUniforms.u_glowPulse, this.glowPulse);
+      gl.uniform1f(
+        this.drawUniforms.u_glowPulse,
+        this.glowPulse + this.resonanceAmount * 0.16,
+      );
       gl.uniform1f(this.drawUniforms.u_glowFade, this.glowFade);
       gl.uniform1f(this.drawUniforms.u_blowLevel, this.blowLevel || 0);
       gl.uniform1f(this.drawUniforms.u_north, this.north || 0);

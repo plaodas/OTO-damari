@@ -21,6 +21,8 @@ import { ParticleField } from "./particles.js";
 import { estimatePhotoField } from "./photo-depth.js";
 
 const GRAIN_VOICES = 3;
+const SOLFEGGIO_FREQUENCIES = [174, 285, 396, 417, 528, 639, 741, 852, 963];
+const RESONANCE_COOLDOWN_MS = 4000;
 
 const LEVEL_ENTER = [0, 0.012, 0.032, 0.07];
 const LEVEL_EXIT = [0, 0.008, 0.024, 0.05];
@@ -620,6 +622,9 @@ class HybridSynth {
     this.grain = null;
     this.grainAhead = 0;
     this.grainVoice = 0;
+    this.resonanceIndex = 0;
+    this.lastResonanceAt = -Infinity;
+    this.resonanceVoice = null;
   }
 
   unlock() {
@@ -697,6 +702,57 @@ class HybridSynth {
     envelope.connect(this.master);
     oscillator.start(startAt);
     oscillator.stop(startAt + decay + 0.03);
+  }
+
+  triggerResonance() {
+    const context = this.unlock();
+    const nowMs = performance.now();
+    if (!context || !this.master || nowMs - this.lastResonanceAt < RESONANCE_COOLDOWN_MS) {
+      return false;
+    }
+
+    this.lastResonanceAt = nowMs;
+    const frequency = SOLFEGGIO_FREQUENCIES[this.resonanceIndex];
+    this.resonanceIndex = (this.resonanceIndex + 1) % SOLFEGGIO_FREQUENCIES.length;
+
+    const startAt = context.currentTime;
+    if (this.resonanceVoice) {
+      const previous = this.resonanceVoice;
+      previous.gain.gain.cancelScheduledValues(startAt);
+      previous.gain.gain.setValueAtTime(
+        Math.max(0.0001, previous.gain.gain.value),
+        startAt,
+      );
+      previous.gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.08);
+      try {
+        previous.oscillator.stop(startAt + 0.1);
+      } catch {
+        // The previous resonance may already have ended.
+      }
+      this.resonanceVoice = null;
+    }
+
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const peak = frequency <= 285 ? 0.024 : 0.017;
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, startAt);
+    gain.gain.setValueAtTime(0.0001, startAt);
+    gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.18);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 1.8);
+    oscillator.connect(gain);
+    gain.connect(this.master);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + 1.85);
+
+    const voice = { oscillator, gain };
+    this.resonanceVoice = voice;
+    oscillator.addEventListener("ended", () => {
+      oscillator.disconnect();
+      gain.disconnect();
+      if (this.resonanceVoice === voice) this.resonanceVoice = null;
+    });
+    return true;
   }
 
   playKarplus(startAt, frequency, peak, duration, options = {}) {
@@ -969,10 +1025,18 @@ async function start() {
   const synth = new HybridSynth();
   const motion = new MotionInput();
   let lastLevel = 0;
+  let northWasActive = false;
+
+  function triggerResonance() {
+    if (!synth.triggerResonance()) return;
+    particles.pulseResonance();
+  }
+
   motion.onShake = (amount) => {
     particles.shake(amount);
     synth.unlock();
     synth.playKirari();
+    triggerResonance();
   };
   let volumeCloseTimer = 0;
 
@@ -1154,6 +1218,7 @@ async function start() {
       particles.setPhotoField(fieldData);
       synth.unlock();
       synth.playKirari();
+      triggerResonance();
       stopCamera();
     } catch (error) {
       console.warn("写真を解析できませんでした。", error);
@@ -1201,11 +1266,13 @@ async function start() {
   function endPointer(event) {
     if (!pointer) return;
     if (event && pointer.id != null && event.pointerId !== pointer.id) return;
+    const shouldResonate = !pointer.swiping && event?.type !== "pointercancel";
     if (pointer.swiping) {
       particles.releaseSwipe();
       if (mic.level !== 3) synth.stopShimmer();
     }
     pointer = null;
+    if (shouldResonate) triggerResonance();
   }
 
   canvas.addEventListener("pointerdown", (event) => {
@@ -1239,6 +1306,7 @@ async function start() {
       particles.beginSwipe(pointer.startX, pointer.startY, point.x, point.y);
       synth.unlock();
       synth.playKirari();
+      triggerResonance();
       if (mic.level !== 3) synth.startShimmer();
     }
     if (pointer.swiping) particles.steerSwipe(point.x, point.y);
@@ -1265,11 +1333,18 @@ async function start() {
     mic.update();
     motion.update(deltaSeconds);
     particles.setTilt(motion.tiltX, motion.tiltY, motion.north);
+    if (motion.north >= 0.65 && !northWasActive) {
+      northWasActive = true;
+      triggerResonance();
+    } else if (motion.north <= 0.25) {
+      northWasActive = false;
+    }
     if (mic.level !== lastLevel) {
       if (mic.level === 3) synth.startShimmer();
       else synth.stopShimmer();
 
       if (mic.level > lastLevel) {
+        triggerResonance();
         if (mic.level === 1) {
           synth.playChirin();
           particles.pulse("weak");
