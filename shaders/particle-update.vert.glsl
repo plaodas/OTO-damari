@@ -37,7 +37,7 @@ void main() {
   float ambient = step(0.52, fract(a_phase * 1.17 + a_home.x * 0.73));
   vec4 photo = texelFetch(u_photoField, ivec2(gl_VertexID, 0), 0);
   float shapeSeed = fract(a_phase * 0.7548777 + a_home.x * 0.5698403);
-  float shapeShare = 1.0 - step(0.7, shapeSeed);
+  float shapeShare = 1.0 - step(0.8, shapeSeed);
   float shapeReveal = smoothstep(shapeSeed * 0.72, shapeSeed * 0.72 + 0.3, u_photoAmount);
   float photoHold = shapeReveal * shapeShare * photo.a;
   float spread = ambient > 0.5 ? 1.0 : (u_blooming > 0.5 ? u_disperse : 1.0);
