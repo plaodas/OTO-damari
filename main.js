@@ -199,6 +199,8 @@ class MotionInput {
     this.gravityRaw = null;
     this.magRaw = null;
     this.north = 0;
+    this.useRelativeHeading = false;
+    this.headingWatchdog = 0;
     this.motionEnergy = 0;
     this.poseDelta = 0;
     this.stillSeconds = 0;
@@ -239,6 +241,19 @@ class MotionInput {
     this.bind();
     this.startHeadingSensor();
     this.startCompassSensors();
+    this.armRelativeHeadingFallback();
+  }
+
+  armRelativeHeadingFallback() {
+    if (!this.android || this.headingWatchdog) return;
+    this.headingWatchdog = window.setTimeout(() => {
+      if (this.sensorHeading == null) this.useRelativeHeading = true;
+    }, 1200);
+  }
+
+  allowRelativeHeading() {
+    if (!this.android) return;
+    this.useRelativeHeading = true;
   }
 
   bind() {
@@ -254,7 +269,10 @@ class MotionInput {
   startHeadingSensor() {
     if (this.headingSensor) return;
     const Sensor = window.AbsoluteOrientationSensor;
-    if (typeof Sensor !== "function") return;
+    if (typeof Sensor !== "function") {
+      this.allowRelativeHeading();
+      return;
+    }
     for (const referenceFrame of ["device", "screen"]) {
       try {
         const sensor = new Sensor({ frequency: 20, referenceFrame });
@@ -263,6 +281,10 @@ class MotionInput {
           if (heading == null) return;
           this.sensorHeading =
             referenceFrame === "screen" ? heading : (heading + this.screenAngle() + 360) % 360;
+          if (this.headingWatchdog) {
+            clearTimeout(this.headingWatchdog);
+            this.headingWatchdog = 0;
+          }
         });
         sensor.addEventListener("error", () => {
           try {
@@ -271,21 +293,27 @@ class MotionInput {
             // Sensor may already be stopped.
           }
           if (this.headingSensor === sensor) this.headingSensor = null;
+          this.allowRelativeHeading();
         });
         sensor.start();
         this.headingSensor = sensor;
+        this.armRelativeHeadingFallback();
         return;
       } catch {
         // Try the next reference frame.
       }
     }
+    this.allowRelativeHeading();
   }
 
   startCompassSensors() {
     if (this.magnetometer) return;
     const Mag = window.Magnetometer;
     const Accel = window.Accelerometer;
-    if (typeof Mag !== "function") return;
+    if (typeof Mag !== "function") {
+      if (!this.headingSensor) this.allowRelativeHeading();
+      return;
+    }
     try {
       const magnetometer = new Mag({ frequency: 20, referenceFrame: "device" });
       magnetometer.addEventListener("reading", () => {
@@ -304,6 +332,7 @@ class MotionInput {
       this.magnetometer = magnetometer;
     } catch {
       this.magnetometer = null;
+      if (!this.headingSensor) this.allowRelativeHeading();
       return;
     }
     if (typeof Accel !== "function") return;
@@ -433,10 +462,16 @@ class MotionInput {
     if (Number.isFinite(event.compassHeading)) {
       return (event.compassHeading + screen + 360) % 360;
     }
+    const relativeOk =
+      this.useRelativeHeading &&
+      Number.isFinite(event.alpha) &&
+      Number.isFinite(event.beta) &&
+      Number.isFinite(event.gamma);
     const absolute =
       event.absolute === true ||
       event.type === "deviceorientationabsolute" ||
-      (this.android && event.absolute !== false);
+      (this.android && event.absolute !== false) ||
+      relativeOk;
     if (!absolute || !Number.isFinite(event.alpha)) return null;
     if (Number.isFinite(event.beta) && Number.isFinite(event.gamma)) {
       return (this.compassFromEuler(event.alpha, event.beta, event.gamma) + screen + 360) % 360;
