@@ -37,8 +37,8 @@ vec2 shakeVortex(vec2 pos, vec2 center, float sense, float strength) {
   vec2 d = pos - center;
   vec2 span = vec2(0.2, 0.095);
   float diamond = abs(d.x) / span.x + abs(d.y) / span.y;
-  float ring = exp(-pow(diamond - 1.0, 2.0) / 0.055);
-  float near = exp(-pow(max(diamond - 1.0, 0.0), 2.0) / 0.28);
+  float ring = exp(-pow(diamond - 1.0, 2.0) / 0.1);
+  float near = exp(-pow(max(diamond - 1.0, 0.0), 2.0) / 0.5);
   vec2 grad = vec2(sign(d.x) / span.x, sign(d.y) / span.y);
   float glen = max(length(grad), 0.001);
   vec2 tangent = vec2(-grad.y, grad.x) / glen;
@@ -111,11 +111,11 @@ void main() {
       ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
       ambient > 0.5 ? 0.22 : 0.16,
       idle
-    ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88) * (1.0 - u_shake * 0.78);
+    ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88) * (1.0 - smoothstep(0.03, 0.14, u_shake));
     vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.01, idle);
     wander += vec2(swellA, swellB) * idle * 0.018;
     float freedom = 1.0 - photoHold * 0.88;
-    vel += (wander - vel) * min(1.0, mix(1.8, 0.9, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8) * (1.0 - u_shake * 0.7);
+    vel += (wander - vel) * min(1.0, mix(1.8, 0.9, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8) * (1.0 - smoothstep(0.03, 0.14, u_shake) * 0.95);
     vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
@@ -148,11 +148,11 @@ void main() {
   vel += u_tilt * (0.011 + tiltLen * 0.008) * (1.0 - photoHold * 0.9);
   vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
-    float curl = u_shake * 0.26;
+    float curl = u_shake * 0.32;
     vel += shakeVortex(pos, vec2(0.5, 0.22), 1.0, curl);
     vel += shakeVortex(pos, vec2(0.5, 0.5), 1.0, curl);
     vel += shakeVortex(pos, vec2(0.5, 0.78), 1.0, curl);
-    vel += shakeConvection(pos, u_shake * 0.3);
+    vel += shakeConvection(pos, u_shake * 0.26);
   }
 
   float damping = mix(mix(0.965, 0.96, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
