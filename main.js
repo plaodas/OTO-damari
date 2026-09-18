@@ -129,77 +129,77 @@ class MotionInput {
     this.tiltX = 0;
     this.tiltY = 0;
     this.started = false;
+    this.bound = false;
     this.startPromise = null;
     this.lastShakeAt = 0;
     this.armedAt = 0;
     this.gravityX = 0;
     this.gravityY = 0;
-    this.hasGravity = false;
+    this.hasOrientation = false;
     this.onShake = null;
+    this.android = /Android/i.test(navigator.userAgent);
   }
 
   start() {
     if (this.startPromise) return this.startPromise;
-
-    this.startPromise = this.requestPermission()
-      .then((allowed) => {
-        if (!allowed) return;
-        this.started = true;
-        this.armedAt = performance.now() + 450;
-        window.addEventListener("devicemotion", this.handleMotion, { passive: true });
-        window.addEventListener("deviceorientation", this.handleOrientation, { passive: true });
-      })
-      .catch((error) => {
-        console.warn("端末の傾き・シェイクを開始できませんでした。", error);
-      });
-
+    this.startPromise = this.enable();
     return this.startPromise;
   }
 
-  async requestPermission() {
+  async enable() {
     const motion = window.DeviceMotionEvent;
     const orientation = window.DeviceOrientationEvent;
-    if (!motion && !orientation) return false;
+    if (!motion && !orientation) return;
 
     try {
       if (typeof motion?.requestPermission === "function") {
         const state = await motion.requestPermission();
-        if (state !== "granted") return false;
+        if (state !== "granted") {
+          console.warn("モーションセンサーが許可されませんでした。");
+        }
       }
       if (typeof orientation?.requestPermission === "function") {
         await orientation.requestPermission().catch(() => "denied");
       }
     } catch (error) {
       console.warn("モーションセンサーの許可を取得できませんでした。", error);
-      return false;
     }
-    return true;
+
+    this.bind();
   }
 
-  screenGravity(gx, gy) {
-    const angle = Number(screen.orientation?.angle ?? window.orientation ?? 0);
-    let x = gx;
-    let y = gy;
-    if (angle === 90) {
-      x = gy;
-      y = -gx;
-    } else if (angle === 180) {
-      x = -gx;
-      y = -gy;
-    } else if (angle === 270 || angle === -90) {
-      x = -gy;
-      y = gx;
-    }
-    return { x: x / 9.81, y: -y / 9.81 };
+  bind() {
+    if (this.bound) return;
+    this.bound = true;
+    this.started = true;
+    this.armedAt = performance.now() + 400;
+    window.addEventListener("devicemotion", this.handleMotion, { passive: true });
+    window.addEventListener("deviceorientation", this.handleOrientation, { passive: true });
+    window.addEventListener("deviceorientationabsolute", this.handleOrientation, { passive: true });
+  }
+
+  screenAngle() {
+    return Number(screen.orientation?.angle ?? window.orientation ?? 0);
+  }
+
+  rotateToScreen(x, y) {
+    const angle = this.screenAngle();
+    if (angle === 90) return { x: y, y: -x };
+    if (angle === 180) return { x: -x, y: -y };
+    if (angle === 270 || angle === -90) return { x: -y, y: x };
+    return { x, y };
   }
 
   handleMotion = (event) => {
     const gravity = event.accelerationIncludingGravity;
-    if (gravity && Number.isFinite(gravity.x) && Number.isFinite(gravity.y)) {
-      const mapped = this.screenGravity(gravity.x, gravity.y);
-      this.gravityX += (mapped.x - this.gravityX) * 0.14;
-      this.gravityY += (mapped.y - this.gravityY) * 0.14;
-      this.hasGravity = true;
+    if (!this.hasOrientation && gravity && Number.isFinite(gravity.x) && Number.isFinite(gravity.y)) {
+      const mag = Math.hypot(gravity.x, gravity.y, gravity.z || 0);
+      if (mag > 6) {
+        const sign = this.android ? 1 : -1;
+        const mapped = this.rotateToScreen(sign * (gravity.x / mag), sign * ((gravity.z || 0) / mag));
+        this.gravityX += (mapped.x - this.gravityX) * 0.18;
+        this.gravityY += (mapped.y - this.gravityY) * 0.18;
+      }
     }
 
     const user = event.acceleration;
@@ -222,21 +222,21 @@ class MotionInput {
   };
 
   handleOrientation = (event) => {
-    if (this.hasGravity) return;
     if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
-    const mapped = this.screenGravity(event.gamma / 9, (event.beta - 45) / 9);
-    this.gravityX += (mapped.x - this.gravityX) * 0.12;
-    this.gravityY += (mapped.y - this.gravityY) * 0.12;
+    this.hasOrientation = true;
+    const mapped = this.rotateToScreen(event.gamma / 32, (event.beta - 90) / 32);
+    this.gravityX += (Math.max(-1, Math.min(1, mapped.x)) - this.gravityX) * 0.22;
+    this.gravityY += (Math.max(-1, Math.min(1, mapped.y)) - this.gravityY) * 0.22;
   };
 
   update() {
     if (!this.started) return;
     const clamp = (value) => Math.max(-1, Math.min(1, value));
-    const dead = 0.06;
+    const dead = 0.08;
     const x = clamp(this.gravityX);
     const y = clamp(this.gravityY);
-    this.tiltX += ((Math.abs(x) < dead ? 0 : x) - this.tiltX) * 0.18;
-    this.tiltY += ((Math.abs(y) < dead ? 0 : y) - this.tiltY) * 0.18;
+    this.tiltX += ((Math.abs(x) < dead ? 0 : x) - this.tiltX) * 0.22;
+    this.tiltY += ((Math.abs(y) < dead ? 0 : y) - this.tiltY) * 0.22;
   }
 }
 
@@ -705,6 +705,7 @@ async function start() {
     const context = synth.unlock();
     synth.playTap();
     motion.start();
+    motion.bind();
     if (!inputStarted && context && navigator.mediaDevices?.getUserMedia) {
       inputStarted = true;
       mic.start(context);
