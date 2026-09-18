@@ -43,6 +43,8 @@ void main() {
   float shapeReveal = smoothstep(shapeSeed * 0.72, shapeSeed * 0.72 + 0.3, u_photoAmount);
   float photoHold = shapeReveal * shapeShare * photo.a;
   float idle = 1.0 - max(u_gather, max(step(0.5, u_blooming), step(0.5, u_blowLevel)));
+  float tiltLen = length(u_tilt);
+  float tiltAmt = smoothstep(0.03, 0.14, tiltLen);
   float spread = ambient > 0.5 ? 1.0 : (u_blooming > 0.5 ? u_disperse : 1.0);
   vec2 rel = pos - u_origin;
   float along = dot(rel, u_axis);
@@ -81,10 +83,10 @@ void main() {
       ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
       ambient > 0.5 ? 0.4 : 0.32,
       idle
-    ) * (1.0 - u_north * idle * 0.72);
+    ) * (1.0 - u_north * idle * 0.72) * (1.0 - tiltAmt * 0.88);
     vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.015, idle);
     float freedom = 1.0 - photoHold * 0.88;
-    vel += (wander - vel) * min(1.0, mix(1.8, 0.75, idle) * u_dt) * spread * freedom;
+    vel += (wander - vel) * min(1.0, mix(1.8, 0.75, idle) * u_dt) * spread * freedom * (1.0 - tiltAmt * 0.8);
     vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
@@ -114,7 +116,6 @@ void main() {
     }
   }
 
-  float tiltLen = length(u_tilt);
   vel += u_tilt * (0.011 + tiltLen * 0.008) * (1.0 - photoHold * 0.9);
   vel += vec2(0.0, -u_north * 0.022) * idle * (1.0 - photoHold * 0.9);
   if (u_shake > 0.01 && photoHold < 0.5) {
