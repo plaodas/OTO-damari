@@ -52,6 +52,7 @@ class MicInput {
     this.analyser = null;
     this.samples = null;
     this.stream = null;
+    this.source = null;
     this.startPromise = null;
     this.rms = 0;
     this.energy = 0;
@@ -60,25 +61,67 @@ class MicInput {
     this.debugLevel = null;
   }
 
+  hasLiveTrack() {
+    return Boolean(this.stream?.getAudioTracks().some((track) => track.readyState === "live"));
+  }
+
   start(audioContext) {
+    if (this.hasLiveTrack() && this.analyser) return this.startPromise || Promise.resolve();
     if (this.startPromise) return this.startPromise;
 
     this.startPromise = navigator.mediaDevices
-      .getUserMedia({ audio: true })
+      .getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      })
       .then((stream) => {
+        this.disconnect();
         this.stream = stream;
-        const source = audioContext.createMediaStreamSource(stream);
+        for (const track of stream.getAudioTracks()) {
+          track.addEventListener("ended", () => {
+            this.disconnect();
+          });
+        }
+        this.source = audioContext.createMediaStreamSource(stream);
         this.analyser = audioContext.createAnalyser();
         this.analyser.fftSize = 1024;
         this.analyser.smoothingTimeConstant = 0;
         this.samples = new Float32Array(this.analyser.fftSize);
-        source.connect(this.analyser);
+        this.source.connect(this.analyser);
       })
       .catch((error) => {
         console.warn("マイクを開始できませんでした。タップ操作のみで続行します。", error);
+        this.disconnect();
+      })
+      .finally(() => {
+        this.startPromise = null;
       });
 
     return this.startPromise;
+  }
+
+  ensure(audioContext) {
+    if (!audioContext) return Promise.resolve();
+    if (this.hasLiveTrack() && this.analyser) return Promise.resolve();
+    this.startPromise = null;
+    return this.start(audioContext);
+  }
+
+  disconnect() {
+    try {
+      this.source?.disconnect();
+    } catch {
+      // already disconnected
+    }
+    this.source = null;
+    this.analyser = null;
+    if (this.stream) {
+      for (const track of this.stream.getTracks()) track.stop();
+    }
+    this.stream = null;
   }
 
   classify(signal) {
@@ -695,6 +738,8 @@ async function start() {
     cameraPreview.srcObject = null;
     cameraPanel.hidden = true;
     cameraShutter.disabled = true;
+    const context = synth.unlock();
+    mic.ensure(context);
   }
 
   async function openCamera() {
@@ -793,7 +838,6 @@ async function start() {
   window.addEventListener("resize", resize, { passive: true });
   resize();
 
-  let inputStarted = false;
   let pointer = null;
 
   function localPoint(event) {
@@ -830,9 +874,8 @@ async function start() {
     synth.playTap();
     motion.start();
     motion.bind();
-    if (!inputStarted && context && navigator.mediaDevices?.getUserMedia) {
-      inputStarted = true;
-      mic.start(context);
+    if (context && navigator.mediaDevices?.getUserMedia) {
+      mic.ensure(context);
     }
   });
 
