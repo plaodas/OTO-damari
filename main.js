@@ -192,6 +192,8 @@ class MotionInput {
     this.hasOrientation = false;
     this.gotRelativeOrientation = false;
     this.heading = null;
+    this.sensorHeading = null;
+    this.headingSensor = null;
     this.north = 0;
     this.onShake = null;
     this.android = /Android/i.test(navigator.userAgent);
@@ -218,11 +220,19 @@ class MotionInput {
       if (typeof orientation?.requestPermission === "function") {
         await orientation.requestPermission().catch(() => "denied");
       }
+      if (navigator.permissions?.query) {
+        await Promise.allSettled(
+          ["accelerometer", "gyroscope", "magnetometer"].map((name) =>
+            navigator.permissions.query({ name }),
+          ),
+        );
+      }
     } catch (error) {
       console.warn("モーションセンサーの許可を取得できませんでした。", error);
     }
 
     this.bind();
+    this.startHeadingSensor();
   }
 
   bind() {
@@ -232,7 +242,69 @@ class MotionInput {
     this.armedAt = performance.now() + 450;
     window.addEventListener("devicemotion", this.handleMotion, { passive: true });
     window.addEventListener("deviceorientation", this.handleOrientation, { passive: true });
-    window.addEventListener("deviceorientationabsolute", this.handleOrientation, { passive: true });
+    window.addEventListener("deviceorientationabsolute", this.handleAbsoluteOrientation, { passive: true });
+  }
+
+  startHeadingSensor() {
+    const Sensor = window.AbsoluteOrientationSensor;
+    if (typeof Sensor !== "function") return;
+    for (const referenceFrame of ["screen", "device"]) {
+      try {
+        const sensor = new Sensor({ frequency: 20, referenceFrame });
+        sensor.addEventListener("reading", () => {
+          const heading = this.headingFromQuaternion(sensor.quaternion);
+          if (heading == null) return;
+          this.sensorHeading =
+            referenceFrame === "device" ? (heading + this.screenAngle() + 360) % 360 : heading;
+        });
+        sensor.addEventListener("error", () => {
+          try {
+            sensor.stop();
+          } catch {
+            // Sensor may already be stopped.
+          }
+          if (this.headingSensor === sensor) this.headingSensor = null;
+        });
+        sensor.start();
+        this.headingSensor = sensor;
+        return;
+      } catch {
+        // Try the next reference frame.
+      }
+    }
+  }
+
+  headingFromQuaternion(quaternion) {
+    if (!quaternion || quaternion.length < 4) return null;
+    const [qx, qy, qz, qw] = quaternion;
+    const vx = 0;
+    const vy = 0;
+    const vz = -1;
+    const tx = 2 * (qy * vz - qz * vy);
+    const ty = 2 * (qz * vx - qx * vz);
+    const tz = 2 * (qx * vy - qy * vx);
+    const east = vx + qw * tx + (qy * tz - qz * ty);
+    const north = vy + qw * ty + (qz * tx - qx * tz);
+    if (!Number.isFinite(east) || !Number.isFinite(north)) return null;
+    if (Math.hypot(east, north) < 0.12) return null;
+    return (Math.atan2(east, north) * (180 / Math.PI) + 360) % 360;
+  }
+
+  compassFromEuler(alpha, beta, gamma) {
+    const toRad = Math.PI / 180;
+    const x = beta * toRad;
+    const y = gamma * toRad;
+    const z = alpha * toRad;
+    const cX = Math.cos(x);
+    const cY = Math.cos(y);
+    const cZ = Math.cos(z);
+    const sX = Math.sin(x);
+    const sY = Math.sin(y);
+    const sZ = Math.sin(z);
+    const vx = -cZ * sY - sZ * sX * cY;
+    const vy = -sZ * sY + cZ * sX * cY;
+    if (Math.hypot(vx, vy) < 1e-5) return (360 - alpha + 360) % 360;
+    return (Math.atan2(vx, vy) * (180 / Math.PI) + 360) % 360;
   }
 
   screenAngle() {
@@ -252,11 +324,18 @@ class MotionInput {
     if (Number.isFinite(event.webkitCompassHeading)) {
       return (event.webkitCompassHeading + screen + 360) % 360;
     }
-    const absolute = event.absolute === true || event.type === "deviceorientationabsolute";
-    if (absolute && Number.isFinite(event.alpha)) {
-      return (360 - event.alpha + screen + 360) % 360;
+    if (Number.isFinite(event.compassHeading)) {
+      return (event.compassHeading + screen + 360) % 360;
     }
-    return null;
+    const absolute =
+      event.absolute === true ||
+      event.type === "deviceorientationabsolute" ||
+      (this.android && event.absolute !== false);
+    if (!absolute || !Number.isFinite(event.alpha)) return null;
+    if (Number.isFinite(event.beta) && Number.isFinite(event.gamma)) {
+      return (this.compassFromEuler(event.alpha, event.beta, event.gamma) + screen + 360) % 360;
+    }
+    return (360 - event.alpha + screen + 360) % 360;
   }
 
   northAlignment(heading) {
@@ -306,19 +385,29 @@ class MotionInput {
     }
   };
 
+  handleAbsoluteOrientation = (event) => {
+    const heading = this.readHeading(event);
+    if (heading != null) this.heading = heading;
+    if (this.gotRelativeOrientation) return;
+    if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+    this.hasOrientation = true;
+    const mapped = this.rotateToScreen(event.gamma / 32, (event.beta - 90) / 32);
+    this.setRawTilt(mapped.x, mapped.y);
+  };
+
   handleOrientation = (event) => {
     const heading = this.readHeading(event);
     if (heading != null) this.heading = heading;
-    if (event.type === "deviceorientationabsolute" && this.gotRelativeOrientation) return;
     if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
-    if (event.type === "deviceorientation") this.gotRelativeOrientation = true;
+    this.gotRelativeOrientation = true;
     this.hasOrientation = true;
     const mapped = this.rotateToScreen(event.gamma / 32, (event.beta - 90) / 32);
     this.setRawTilt(mapped.x, mapped.y);
   };
 
   update() {
-    const northTarget = this.heading == null ? 0 : this.northAlignment(this.heading);
+    const heading = this.sensorHeading ?? this.heading;
+    const northTarget = heading == null ? 0 : this.northAlignment(heading);
     this.north += (northTarget - this.north) * 0.12;
 
     if (!this.started || !this.restReady) {
