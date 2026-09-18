@@ -751,6 +751,7 @@ async function start() {
           cameraPreview,
           window.innerWidth,
           window.innerHeight,
+          particles.count,
           false,
         );
         particles.setPhotoField(fieldData);

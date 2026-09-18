@@ -76,14 +76,13 @@ void main() {
   }
 
   if (u_photoAmount > 0.001) {
-    vec4 photo = texture(u_photoField, vec2(a_home.x, 1.0 - a_home.y));
-    vec2 edgeOffset = (photo.rg - vec2(128.0 / 255.0)) * (255.0 / 127.0);
-    vec2 edgeTarget = a_home + edgeOffset;
+    vec4 photo = texelFetch(u_photoField, ivec2(gl_VertexID, 0), 0);
+    vec2 edgeTarget = photo.rg;
     float order = fract(a_phase * 0.6180339 + a_home.x * 0.37);
     float revealed = smoothstep(order, min(1.0, order + 0.18), u_photoAmount);
-    float attraction = revealed * photo.a * mix(0.5, 1.0, photo.b);
-    vel += (edgeTarget - pos) * attraction * 2.8 * u_dt;
-    vel *= max(0.72, 1.0 - attraction * 1.8 * u_dt);
+    float attraction = revealed * photo.a * mix(0.75, 1.2, photo.b);
+    vel += (edgeTarget - pos) * attraction * 5.4 * u_dt;
+    vel *= max(0.66, 1.0 - attraction * 2.5 * u_dt);
   }
 
   if (u_burst > 0.01 && ambient < 0.5) {

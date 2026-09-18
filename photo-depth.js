@@ -67,88 +67,75 @@ function sobel(source, width, height) {
   return output;
 }
 
-function createNearestEdgeField(edge, width, height) {
-  const count = width * height;
-  let nearestX = new Int16Array(count);
-  let nearestY = new Int16Array(count);
-  nearestX.fill(-1);
-  nearestY.fill(-1);
+function createParticleTargets(edge, width, height, targetCount) {
+  const candidates = [];
+  let totalWeight = 0;
 
-  for (let i = 0; i < count; i += 1) {
-    if (edge[i] > 0.28) {
-      nearestX[i] = i % width;
-      nearestY[i] = Math.floor(i / width);
-    }
-  }
+  for (let y = 2; y < height - 2; y += 2) {
+    for (let x = 2; x < width - 2; x += 2) {
+      const index = y * width + x;
+      const strength = edge[index];
+      if (strength < 0.24) continue;
 
-  let nextX = new Int16Array(count);
-  let nextY = new Int16Array(count);
-  let jump = 1;
-  while (jump < Math.max(width, height)) jump *= 2;
-
-  for (jump = Math.floor(jump / 2); jump >= 1; jump = Math.floor(jump / 2)) {
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const index = y * width + x;
-        let bestX = nearestX[index];
-        let bestY = nearestY[index];
-        let bestDistance =
-          bestX >= 0 ? (bestX - x) ** 2 + (bestY - y) ** 2 : Number.POSITIVE_INFINITY;
-
-        for (let oy = -jump; oy <= jump; oy += jump) {
-          for (let ox = -jump; ox <= jump; ox += jump) {
-            const sx = x + ox;
-            const sy = y + oy;
-            if (sx < 0 || sx >= width || sy < 0 || sy >= height) continue;
-            const sample = sy * width + sx;
-            const candidateX = nearestX[sample];
-            const candidateY = nearestY[sample];
-            if (candidateX < 0) continue;
-            const distance = (candidateX - x) ** 2 + (candidateY - y) ** 2;
-            if (distance < bestDistance) {
-              bestDistance = distance;
-              bestX = candidateX;
-              bestY = candidateY;
-            }
+      let localMax = true;
+      for (let oy = -2; oy <= 2 && localMax; oy += 1) {
+        for (let ox = -2; ox <= 2; ox += 1) {
+          if (edge[(y + oy) * width + x + ox] > strength + 0.035) {
+            localMax = false;
+            break;
           }
         }
-
-        nextX[index] = bestX;
-        nextY[index] = bestY;
       }
+      if (!localMax) continue;
+
+      const nx = x / width - 0.5;
+      const ny = y / height - 0.5;
+      const centerWeight = Math.max(0.35, 1 - Math.hypot(nx, ny) * 0.75);
+      const weight = strength * strength * centerWeight;
+      totalWeight += weight;
+      candidates.push({ x, y, strength, totalWeight });
     }
-    [nearestX, nextX] = [nextX, nearestX];
-    [nearestY, nextY] = [nextY, nearestY];
   }
 
-  const pixels = new Uint8Array(count * 4);
-  const reach = Math.max(18, Math.min(width, height) * 0.2);
-  for (let i = 0; i < count; i += 1) {
-    const x = i % width;
-    const y = Math.floor(i / width);
-    const targetX = nearestX[i];
-    const targetY = nearestY[i];
-    const offset = i * 4;
-    if (targetX < 0) {
-      pixels[offset] = 128;
-      pixels[offset + 1] = 128;
-      continue;
+  if (candidates.length === 0) {
+    candidates.push({ x: width * 0.5, y: height * 0.5, strength: 0.5, totalWeight: 1 });
+    totalWeight = 1;
+  }
+
+  const pixels = new Uint8Array(targetCount * 4);
+  for (let i = 0; i < targetCount; i += 1) {
+    const sample = ((i * 0.61803398875 + 0.17) % 1) * totalWeight;
+    let low = 0;
+    let high = candidates.length - 1;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (candidates[middle].totalWeight < sample) low = middle + 1;
+      else high = middle;
     }
 
-    const dx = (targetX - x) / width;
-    const dy = (targetY - y) / height;
-    const distance = Math.hypot(targetX - x, targetY - y);
-    const influence = Math.max(0, 1 - distance / reach);
-    pixels[offset] = Math.round(Math.max(0, Math.min(255, 128 + dx * 127)));
-    pixels[offset + 1] = Math.round(Math.max(0, Math.min(255, 128 + dy * 127)));
-    pixels[offset + 2] = Math.round(edge[targetY * width + targetX] * 255);
-    pixels[offset + 3] = Math.round(influence * 255);
+    const target = candidates[low];
+    const jitter = (i % 5) - 2;
+    const offset = i * 4;
+    pixels[offset] = Math.round(
+      Math.max(0, Math.min(255, ((target.x + jitter * 0.32) / width) * 255)),
+    );
+    pixels[offset + 1] = Math.round(
+      Math.max(0, Math.min(255, ((target.y + jitter * 0.18) / height) * 255)),
+    );
+    pixels[offset + 2] = Math.round(target.strength * 255);
+    pixels[offset + 3] = 255;
   }
 
   return pixels;
 }
 
-export function estimateDepthEdges(source, viewportWidth, viewportHeight, mirror = false) {
+export function estimateDepthEdges(
+  source,
+  viewportWidth,
+  viewportHeight,
+  targetCount,
+  mirror = false,
+) {
   const aspect = Math.max(0.5, Math.min(2, viewportWidth / viewportHeight));
   const width = aspect >= 1 ? MAX_DIMENSION : Math.max(128, Math.round(MAX_DIMENSION * aspect));
   const height = aspect >= 1 ? Math.max(128, Math.round(MAX_DIMENSION / aspect)) : MAX_DIMENSION;
@@ -207,8 +194,8 @@ export function estimateDepthEdges(source, viewportWidth, viewportHeight, mirror
   }
 
   return {
-    width,
-    height,
-    pixels: createNearestEdgeField(edges, width, height),
+    width: targetCount,
+    height: 1,
+    pixels: createParticleTargets(edges, width, height, targetCount),
   };
 }
