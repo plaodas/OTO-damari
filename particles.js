@@ -20,7 +20,7 @@ export class ParticleField {
     this.sizePulse = 0;
     this.waterSheen = 0;
     this.flowBoost = 0;
-    this.flowSpeed = 4;
+    this.flowSpeed = 5;
     this.trailFade = 0;
     this.bloomAge = 0;
     this.disperse = 0;
@@ -426,7 +426,7 @@ export class ParticleField {
     const swipeOnly = this.swipeActive && blowLevel !== 3;
     const flowLevel = blooming ? 3 : blowLevel;
     const flowScale = swipeOnly ? 0.5 : 1;
-    const flowTarget = ([4, 11, 52, 132][flowLevel] + this.flowBoost * 36) * flowScale;
+    const flowTarget = ([5, 11, 52, 132][flowLevel] + this.flowBoost * 36) * flowScale;
     this.flowSpeed += (flowTarget - this.flowSpeed) * Math.min(1, 0.08 * frames);
     this.trailFade = blooming
       ? Math.min(swipeOnly ? 0.21 : 0.42, this.trailFade + deltaSeconds * (swipeOnly ? 1.2 : 2.4))

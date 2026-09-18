@@ -52,7 +52,7 @@ void main() {
   if (u_hasField > 0.5) {
     vec2 field = texture(u_velocity, clamp(vec2(pos.x, 1.0 - pos.y), 0.002, 0.998)).xy;
     field.y = -field.y;
-    vel += field * mix(1.0, 0.08, ambient) * mix(1.0, 0.22, idle) * (1.0 - photoHold * 0.92);
+    vel += field * mix(1.0, 0.08, ambient) * mix(1.0, 0.32, idle) * (1.0 - photoHold * 0.92);
   }
 
   if (u_gather > 0.02 && ambient < 0.5 && photoHold < 0.2) {
@@ -74,16 +74,16 @@ void main() {
   }
 
   if (spread > 0.02) {
-    float waveA = sin(u_time * mix(0.72, 0.26, idle) + a_phase + pos.y * mix(6.0, 2.2, idle));
-    float waveB = cos(u_time * mix(0.51, 0.19, idle) - a_phase * 1.7 + pos.x * mix(5.0, 1.8, idle));
+    float waveA = sin(u_time * mix(0.72, 0.32, idle) + a_phase + pos.y * mix(6.0, 2.8, idle));
+    float waveB = cos(u_time * mix(0.51, 0.24, idle) - a_phase * 1.7 + pos.x * mix(5.0, 2.3, idle));
     float homePull = mix(
       ambient > 0.5 ? 0.28 : (u_blooming > 0.5 ? 1.15 * u_disperse : 0.22),
-      ambient > 0.5 ? 0.46 : 0.38,
+      ambient > 0.5 ? 0.4 : 0.32,
       idle
     );
-    vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.01, idle);
+    vec2 wander = vec2(waveA, waveB) * mix(0.028, 0.015, idle);
     float freedom = 1.0 - photoHold * 0.88;
-    vel += (wander - vel) * min(1.0, mix(1.8, 0.55, idle) * u_dt) * spread * freedom;
+    vel += (wander - vel) * min(1.0, mix(1.8, 0.75, idle) * u_dt) * spread * freedom;
     vel += (a_home - pos) * homePull * u_dt * freedom;
   }
 
@@ -123,7 +123,7 @@ void main() {
     vel += jolt * u_shake * 0.28;
   }
 
-  float damping = mix(mix(0.965, 0.948, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
+  float damping = mix(mix(0.965, 0.954, idle), 0.972, step(0.55, u_gather) * (1.0 - ambient));
   vel *= pow(damping, u_dt * 60.0);
   pos += vel * u_dt;
 
