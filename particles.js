@@ -41,6 +41,7 @@ export class ParticleField {
     this.shakeForce = 0;
     this.photoAmount = 0;
     this.photoTarget = 0;
+    this.photoGatheredSeconds = 0;
 
     this.updateUniforms = getUniforms(gl, programs.update, [
       "u_velocity",
@@ -362,12 +363,14 @@ export class ParticleField {
     gl.activeTexture(gl.TEXTURE0);
     this.photoAmount = 0;
     this.photoTarget = 1;
+    this.photoGatheredSeconds = 0;
     this.glowPulse = Math.max(this.glowPulse, 0.7);
     this.sizePulse = Math.max(this.sizePulse, 0.35);
   }
 
   clearPhotoField() {
     this.photoTarget = 0;
+    this.photoGatheredSeconds = 0;
   }
 
   shake(amount) {
@@ -399,6 +402,10 @@ export class ParticleField {
     const photoRate = this.photoTarget > this.photoAmount ? 0.18 : 0.42;
     const photoStep = photoRate * deltaSeconds;
     this.photoAmount += Math.max(-photoStep, Math.min(photoStep, this.photoTarget - this.photoAmount));
+    if (this.photoTarget > 0.5 && this.photoAmount >= 0.995) {
+      this.photoGatheredSeconds += deltaSeconds;
+      if (this.photoGatheredSeconds >= 5) this.clearPhotoField();
+    }
     this.blowEnergy = blowEnergy;
     this.blowLevel = blowLevel;
 
