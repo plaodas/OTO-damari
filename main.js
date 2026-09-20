@@ -963,77 +963,6 @@ class HybridSynth {
     }, (duration + 0.08) * 1000);
   }
 
-  playChirin() {
-    const context = this.unlock();
-    if (!context || !this.master) return;
-    const startAt = context.currentTime;
-    this.playKarplus(startAt, 2200, 0.11, 0.11, {
-      burst: 0.008,
-      cutoff: 4500,
-      feedback: 0.84,
-    });
-    this.playPartial(startAt, 2200, 0.032, 0.08);
-    this.playPartial(startAt, 2200 * 2.11, 0.012, 0.05);
-  }
-
-  playKirari() {
-    const context = this.unlock();
-    if (!context || !this.master) return;
-    const startAt = context.currentTime;
-
-    this.playKarplus(startAt, 1600, 0.09, 0.14, {
-      burst: 0.01,
-      cutoff: 4000,
-      feedback: 0.8,
-    });
-    this.playPartial(startAt, 1600, 0.025, 0.1);
-
-    const carrier = context.createOscillator();
-    const modulator = context.createOscillator();
-    const modulation = context.createGain();
-    const envelope = context.createGain();
-    carrier.type = "sine";
-    modulator.type = "sine";
-    carrier.frequency.setValueAtTime(1600, startAt);
-    modulator.frequency.setValueAtTime(800, startAt);
-    modulation.gain.setValueAtTime(800 * 1.2, startAt);
-    this.playEnvelope(envelope, startAt, 0.05, 0.12);
-    modulator.connect(modulation);
-    modulation.connect(carrier.frequency);
-    carrier.connect(envelope);
-    envelope.connect(this.master);
-    carrier.start(startAt);
-    modulator.start(startAt);
-    carrier.stop(startAt + 0.15);
-    modulator.stop(startAt + 0.15);
-
-    const noise = context.createBufferSource();
-    const noiseFilter = context.createBiquadFilter();
-    const noiseGain = context.createGain();
-    noise.buffer = this.noiseBuffer;
-    noiseFilter.type = "highpass";
-    noiseFilter.frequency.setValueAtTime(4200, startAt);
-    this.playEnvelope(noiseGain, startAt, 0.018, 0.028);
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(this.master);
-    noise.start(startAt);
-    noise.stop(startAt + 0.05);
-  }
-
-  playTap() {
-    const context = this.unlock();
-    if (!context || !this.master) return;
-    const startAt = context.currentTime;
-    const frequency = 2300 + Math.random() * 400;
-    this.playKarplus(startAt, frequency, 0.08, 0.085, {
-      burst: 0.006,
-      cutoff: 4800,
-      feedback: 0.82,
-    });
-    this.playPartial(startAt, frequency, 0.016, 0.045);
-  }
-
   startShimmer() {
     const context = this.unlock();
     if (!context || !this.master || this.grain) return;
@@ -1221,7 +1150,6 @@ async function start() {
     if (appMode !== "freeplay") return;
     particles.shake(amount);
     synth.unlock();
-    synth.playKirari();
     triggerResonance();
   };
   let volumeCloseTimer = 0;
@@ -1485,7 +1413,6 @@ async function start() {
       restoreViewport();
       particles.setPhotoField(fieldData);
       synth.unlock();
-      synth.playKirari();
       triggerResonance();
       stopCamera();
     } catch (error) {
