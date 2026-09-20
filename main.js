@@ -762,6 +762,7 @@ class HybridSynth {
 
     const oscillator = context.createOscillator();
     const gain = context.createGain();
+    // タップ・スワイプ・シェイクの共鳴です。0.02 / 0.014 を 0.03 / 0.021 くらいまで上げると、だいたい 1.5 倍
     const peak = (note <= 285 ? 0.02 : 0.014) / Math.sqrt(this.resonanceVoices.length + 1);
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(note, startAt);
