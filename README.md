@@ -2,6 +2,11 @@
 
 吹くと青いノイズ粒が流れ、夜光虫のような光と音が呼応する WebGL2 / WebAudio MVP です。WebGL2 必須です。half-float の速度場が使えない端末では、粒子は従来の漏斗式で動きます。
 
+<p align="center">
+  <img src="docs/landing.png" alt="起動画面" width="240">
+  <img src="docs/freeplay.png" alt="自由モードの粒子" width="240">
+</p>
+
 ## 起動
 
 ```bash
@@ -101,6 +106,9 @@ npm run preview
 ├── photo-ml.js
 ├── gl.js
 ├── quality.js
+├── docs
+│   ├── landing.png
+│   └── freeplay.png
 ├── public
 │   ├── apple-touch-icon.png
 │   ├── icons
