@@ -112,6 +112,19 @@ export class GuidedRestSession {
     return this.phase === "breathe" && this.cycleTime >= EXPAND_SECONDS + 0.35;
   }
 
+  get cue() {
+    if (this.phase !== "breathe") return { text: "", amount: 0 };
+    const breatheElapsed = this.elapsed - SETTLE_SECONDS;
+    const cueWindow = CYCLE_SECONDS * 2;
+    if (breatheElapsed < 0 || breatheElapsed >= cueWindow) return { text: "", amount: 0 };
+    const fadeIn = smoothstep(breatheElapsed / 1.2);
+    const fadeOut = 1 - smoothstep((breatheElapsed - (cueWindow - 2.4)) / 2.4);
+    return {
+      text: this.cycleTime < EXPAND_SECONDS ? "吸う" : "吐く",
+      amount: fadeIn * fadeOut * 0.4,
+    };
+  }
+
   updateBreath(energy, level) {
     const strong = level >= 1 || energy >= BREATH_ENTER;
     const present = level >= 1 || energy >= BREATH_HOLD;

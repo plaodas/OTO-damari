@@ -138,6 +138,20 @@
         font: 22px/1 system-ui, sans-serif;
       }
 
+      .breath-cue {
+        position: fixed;
+        top: 42%;
+        left: 50%;
+        z-index: 2;
+        margin: 0;
+        color: #dcf7ff;
+        font: 400 clamp(18px, 5vw, 26px) / 1.2 system-ui, sans-serif;
+        letter-spacing: 0.18em;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        opacity: 0;
+      }
+
       body.mode-landing .camera-button,
       body.mode-guided .camera-button,
       body.mode-complete .camera-button {
@@ -345,6 +359,7 @@
         </button>
       </section>
     </div>
+    <p class="breath-cue" id="breath-cue" aria-live="polite"></p>
     <button class="guided-exit" id="guided-exit" type="button" aria-label="休息を終える" hidden>
       ×
     </button>

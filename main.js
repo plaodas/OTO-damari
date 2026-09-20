@@ -55,6 +55,7 @@ const freeplayStart = document.querySelector("#freeplay-start");
 const completeFreeplay = document.querySelector("#complete-freeplay");
 const guidedRestart = document.querySelector("#guided-restart");
 const guidedExit = document.querySelector("#guided-exit");
+const breathCue = document.querySelector("#breath-cue");
 
 function readStoredVolume() {
   try {
@@ -1280,6 +1281,12 @@ async function start() {
     document.body.classList.add(`mode-${mode}`);
   }
 
+  function setBreathCue(text = "", amount = 0) {
+    if (breathCue.textContent !== text) breathCue.textContent = text;
+    breathCue.style.opacity = String(amount);
+    breathCue.setAttribute("aria-hidden", amount < 0.06 || !text ? "true" : "false");
+  }
+
   function startGuidedRest() {
     setAppMode("guided");
     modeOverlay.hidden = true;
@@ -1293,6 +1300,7 @@ async function start() {
     guidedRest.start();
     lastLevel = 0;
     northWasActive = false;
+    setBreathCue();
     const context = synth.unlock();
     if (context && navigator.mediaDevices?.getUserMedia) mic.ensure(context);
   }
@@ -1308,6 +1316,7 @@ async function start() {
     canvas.focus();
     lastLevel = 0;
     northWasActive = false;
+    setBreathCue();
     const context = synth.unlock();
     motion.start();
     motion.bind();
@@ -1329,6 +1338,7 @@ async function start() {
     landingView.hidden = true;
     completeView.hidden = false;
     modeOverlay.hidden = false;
+    setBreathCue();
     completeFreeplay.focus();
   }
 
@@ -1572,6 +1582,8 @@ async function start() {
         } else if (breath.stopped) {
           synth.stopGuidedTone();
         }
+        const cue = guidedRest.cue;
+        setBreathCue(cue.text, cue.amount);
       }
     } else if (appMode === "freeplay") {
       particles.clearGuidedBreath();
