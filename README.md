@@ -140,4 +140,4 @@ npm run preview
 
 ## ライセンス
 
-[MIT License](LICENSE)
+MIT License
